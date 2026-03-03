@@ -232,8 +232,8 @@ void WJDiagnostics::readECULiveData(std::function<void(const ECUStatus&)> cb)
     auto doNext = std::make_shared<std::function<void()>>();
 
     *doNext = [this, ecu, step, doNext, cb]() {
-        uint8_t ids[] = {0x12, 0x28, 0x20, 0x22};
-        if (*step >= 4) {
+        uint8_t ids[] = {0x12, 0x28, 0x20, 0x22, 0x62};
+        if (*step >= 5) {
             m_lastECU = *ecu;
             emit ecuStatusUpdated(*ecu);
             if (cb) cb(*ecu);
@@ -241,7 +241,7 @@ void WJDiagnostics::readECULiveData(std::function<void(const ECUStatus&)> cb)
         }
         m_kwp->readLocalData(ids[*step], [this, ecu, step, doNext](const QByteArray &data) {
             if (!data.isEmpty()) {
-                uint8_t ids2[] = {0x12, 0x28, 0x20, 0x22};
+                uint8_t ids2[] = {0x12, 0x28, 0x20, 0x22, 0x62};
                 parseECUBlock(ids2[*step], data, *ecu);
             }
             (*step)++;
@@ -463,6 +463,20 @@ void WJDiagnostics::parseECUBlock(uint8_t localID, const QByteArray &d, ECUStatu
                 .arg(ecu.injCorr[0],0,'f',2).arg(ecu.injCorr[1],0,'f',2)
                 .arg(ecu.injCorr[2],0,'f',2).arg(ecu.injCorr[3],0,'f',2)
                 .arg(ecu.injCorr[4],0,'f',2));
+        }
+        break;
+    case 0x62:
+        if (n >= 8) {
+            ecu.egrDuty = u8(2);
+            ecu.wastegate = u8(3);
+            ecu.glowPlug1 = u8(4) != 0;
+            ecu.glowPlug2 = u8(5) != 0;
+            ecu.mafActual = u16(6);
+            if (n >= 9)
+                ecu.alternatorDuty = u8(8);
+            emit logMessage(QString("ECU 2162: egr=%1% wg=%2% maf=%3 alt=%4%")
+                .arg(ecu.egrDuty).arg(ecu.wastegate)
+                .arg(ecu.mafActual).arg(ecu.alternatorDuty));
         }
         break;
     }

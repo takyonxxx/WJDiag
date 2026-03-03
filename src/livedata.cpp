@@ -1,4 +1,4 @@
-﻿#include "livedata.h"
+#include "livedata.h"
 #include <QFile>
 #include <QTextStream>
 #include <QDateTime>
@@ -46,12 +46,20 @@ void LiveDataManager::startLogging(const QString &filePath)
 
     m_logStream = new QTextStream(m_logFile);
 
-    // CSV başlık satırı
+    // CSV baslik: TCM parametreleri + ECU parametreleri
     *m_logStream << "Timestamp(ms),DateTime";
     for (const auto &param : m_tcm->liveDataParams()) {
-        if (m_selectedParams.contains(param.localID)) {
+        if (m_selectedParams.isEmpty() || m_selectedParams.contains(param.localID)) {
             *m_logStream << "," << param.name << "(" << param.unit << ")";
         }
+    }
+    // ECU bloklari aktifse ECU sutunlari ekle
+    if (m_mode == ECU_ONLY || m_mode == DUAL) {
+        *m_logStream << ",ECU_RPM,ECU_Coolant(C),ECU_IAT(C),ECU_TPS(%)"
+                     << ",ECU_Boost(mbar),ECU_BoostSet(mbar)"
+                     << ",ECU_InjQty(mg),ECU_BattV(V)"
+                     << ",ECU_MAF_Act,ECU_MAF_Spec"
+                     << ",ECU_RailAct(bar),ECU_RailSpec(bar)";
     }
     *m_logStream << "\n";
     m_logStream->flush();
@@ -76,21 +84,44 @@ void LiveDataManager::stopLogging()
     }
 }
 
+// === Ana polling dispatcher ===
+
 void LiveDataManager::onPollTimer()
 {
     if (!m_polling || m_readPending) return;
+    m_readPending = true;
 
+    switch (m_mode) {
+    case TCM_ONLY:
+        pollTCM([this]() { m_readPending = false; });
+        break;
+    case ECU_ONLY:
+        pollECU([this]() { m_readPending = false; });
+        break;
+    case DUAL:
+        // Once TCM oku, sonra ECU oku
+        pollTCM([this]() {
+            pollECU([this]() {
+                m_readPending = false;
+            });
+        });
+        break;
+    }
+}
+
+// === TCM Polling (J1850 VPW) ===
+
+void LiveDataManager::pollTCM(std::function<void()> then)
+{
     if (m_selectedParams.isEmpty()) {
-        // Seçili parametre yoksa tüm durumu oku
-        m_readPending = true;
-        m_tcm->readAllLiveData([this](const TCMDiagnostics::TCMStatus &status) {
-            m_readPending = false;
+        // Tum TCM PID'leri oku (readAllLiveData)
+        m_tcm->readAllLiveData([this, then](const TCMDiagnostics::TCMStatus &status) {
             emit fullStatusUpdated(status);
+            logCurrentValues();
+            if (then) then();
         });
     } else {
-        // Sadece seçili parametreleri sırayla oku
-        m_readPending = true;
-
+        // Sadece secili parametreleri oku
         struct ReadCtx {
             int index = 0;
             QList<uint8_t> params;
@@ -100,31 +131,14 @@ void LiveDataManager::onPollTimer()
         ctx->params = m_selectedParams;
 
         auto readNext = std::make_shared<std::function<void()>>();
-        *readNext = [this, ctx, readNext]() {
+        *readNext = [this, ctx, readNext, then]() {
             if (ctx->index >= ctx->params.size()) {
-                // Tüm parametreler okundu
                 m_lastValues = ctx->values;
-                m_readPending = false;
-
                 emit dataUpdated(ctx->values);
-
-                // Loglama
-                if (m_logging && m_logStream) {
-                    qint64 ts = m_elapsed.elapsed();
-                    *m_logStream << ts << ","
-                                << QDateTime::currentDateTime().toString(Qt::ISODate);
-                    for (const auto &param : m_tcm->liveDataParams()) {
-                        if (m_selectedParams.contains(param.localID)) {
-                            *m_logStream << ","
-                                         << ctx->values.value(param.localID, 0);
-                        }
-                    }
-                    *m_logStream << "\n";
-                    m_logStream->flush();
-                }
+                logCurrentValues();
+                if (then) then();
                 return;
             }
-
             uint8_t localID = ctx->params[ctx->index];
             m_tcm->readSingleParam(localID, [ctx, readNext](double val) {
                 ctx->values[ctx->params[ctx->index]] = val;
@@ -132,7 +146,63 @@ void LiveDataManager::onPollTimer()
                 QTimer::singleShot(10, *readNext);
             });
         };
-
         (*readNext)();
     }
+}
+
+// === ECU Polling (K-Line) ===
+
+void LiveDataManager::pollECU(std::function<void()> then)
+{
+    // readECULiveData: switchToModule(MotorECU) + blok okuma + switchToModule(TCM) geri don
+    m_tcm->readECULiveData([this, then](const TCMDiagnostics::ECUStatus &ecu) {
+        m_lastECU = ecu;
+        emit ecuDataUpdated(ecu);
+
+        // DUAL modda: TCM'e geri don (J1850 restore)
+        if (m_mode == DUAL) {
+            m_tcm->switchToModule(TCMDiagnostics::Module::TCM, [then](bool) {
+                if (then) then();
+            });
+        } else {
+            if (then) then();
+        }
+    });
+}
+
+// === Loglama ===
+
+void LiveDataManager::logCurrentValues()
+{
+    if (!m_logging || !m_logStream) return;
+
+    qint64 ts = m_elapsed.elapsed();
+    *m_logStream << ts << ","
+                 << QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    // TCM parametreleri
+    for (const auto &param : m_tcm->liveDataParams()) {
+        if (m_selectedParams.isEmpty() || m_selectedParams.contains(param.localID)) {
+            *m_logStream << "," << m_lastValues.value(param.localID, 0);
+        }
+    }
+
+    // ECU verileri
+    if (m_mode == ECU_ONLY || m_mode == DUAL) {
+        *m_logStream << "," << m_lastECU.rpm
+                     << "," << m_lastECU.coolantTemp
+                     << "," << m_lastECU.iat
+                     << "," << m_lastECU.tps
+                     << "," << m_lastECU.boostPressure
+                     << "," << m_lastECU.boostSetpoint
+                     << "," << m_lastECU.injectionQty
+                     << "," << m_lastECU.batteryVoltage
+                     << "," << m_lastECU.mafActual
+                     << "," << m_lastECU.mafSpec
+                     << "," << m_lastECU.railActual
+                     << "," << m_lastECU.railSpec;
+    }
+
+    *m_logStream << "\n";
+    m_logStream->flush();
 }

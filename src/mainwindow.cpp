@@ -54,6 +54,8 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::onLiveDataUpdated);
     connect(m_liveData, &LiveDataManager::fullStatusUpdated,
             this, &MainWindow::onFullStatusUpdated);
+    connect(m_liveData, &LiveDataManager::ecuDataUpdated,
+            this, &MainWindow::onECUDataUpdated);
 
     setWindowTitle("WJ Diag - Jeep Grand Cherokee 2.7 CRD | NAG1 722.6 TCM");
 
@@ -195,15 +197,22 @@ QWidget* MainWindow::createDashboardPanel()
     g->addWidget(createGaugeCard("TRANS","---","C",&m_dashCoolantVal,&m_dashCoolantUnit), 0,3);
 
     // Row 1: TCC Basinc, Mod PSI, Cikis RPM, Shift PSI
-    g->addWidget(createGaugeCard("TCC PSI","---","PSI",&m_dashBoostVal,&m_dashBoostUnit), 1,0);
-    g->addWidget(createGaugeCard("MOD PSI","---","PSI",&m_dashMafVal,&m_dashMafUnit), 1,1);
+    g->addWidget(createGaugeCard("TCC","---","PSI",&m_dashBoostVal,&m_dashBoostUnit), 1,0);
+    g->addWidget(createGaugeCard("MOD","---","PSI",&m_dashMafVal,&m_dashMafUnit), 1,1);
     g->addWidget(createGaugeCard("CIKIS","---","rpm",&m_dashMapVal,&m_dashMapUnit), 1,2);
     g->addWidget(createGaugeCard("SHIFT","---","PSI",&m_dashPressVal,&m_dashPressUnit), 1,3);
 
-    // Row 2: Selenoid V, Aku V, Limp
+    // Row 2: Selenoid V, Aku V, Su Sicak (Motor), Limp
     g->addWidget(createGaugeCard("SOL V","---","V",&m_dashSolVoltVal,&m_dashSolVoltUnit), 2,0);
     g->addWidget(createGaugeCard("AKU","---","V",&m_dashBatVoltVal,&m_dashBatVoltUnit), 2,1);
-    g->addWidget(createGaugeCard("LIMP","---","",&m_dashLimpVal,&m_dashLimpUnit), 2,2,1,2);
+    g->addWidget(createGaugeCard("SU","---","C",&m_dashMotCoolVal,&m_dashMotCoolUnit), 2,2);
+    g->addWidget(createGaugeCard("LIMP","---","",&m_dashLimpVal,&m_dashLimpUnit), 2,3);
+
+    // Row 3: Motor ECU verileri (DUAL modda guncellenir)
+    g->addWidget(createGaugeCard("M.RPM","---","rpm",&m_dashMotRpmVal,&m_dashMotRpmUnit), 3,0);
+    g->addWidget(createGaugeCard("BOOST","---","mbar",&m_dashMotBoostVal,&m_dashMotBoostUnit), 3,1);
+    g->addWidget(createGaugeCard("MAF","---","mg/s",&m_dashMotMafVal,&m_dashMotMafUnit), 3,2);
+    g->addWidget(createGaugeCard("RAIL","---","bar",&m_dashMotRailVal,&m_dashMotRailUnit), 3,3);
 
     for(int c=0;c<4;++c) g->setColumnStretch(c,1);
     return p;
@@ -256,6 +265,16 @@ void MainWindow::updateDashboardFromLiveData(const QMap<uint8_t, double> &v)
     if(v.contains(0x24)) m_dashMafVal->setText(QString::number(v[0x24],'f',1));
     // Output RPM -> MAP gauge'unda goster
     if(v.contains(0x13)) m_dashMapVal->setText(QString::number(v[0x13],'f',0));
+
+    // Motor ECU KWP local ID'ler (dual mode veya ECU canli veri)
+    // 0x20 = coolant temp block'undan gelir (KWP ReadDataByLocalID)
+    if(v.contains(0xE0)){
+        // 0xE0 = ECU coolant temp (ozel mapping, Motor ECU oturumundan)
+        double ct = v[0xE0];
+        m_dashMotCoolVal->setText(QString::number(ct,'f',0));
+        setGaugeColor(m_dashMotCoolVal,
+            ct > 105 ? "#ff4444" : ct > 95 ? "#ffaa00" : "#00ff88");
+    }
 }
 
 QWidget* MainWindow::createConnectionTab()
@@ -542,9 +561,9 @@ QWidget* MainWindow::createLiveDataTab()
 
     QHBoxLayout *btnLayout = new QHBoxLayout();
 
-    m_startLiveBtn = new QPushButton("Canlı Veriyi Başlat");
+    m_startLiveBtn = new QPushButton("Baslat");
     m_stopLiveBtn  = new QPushButton("Durdur");
-    m_logBtn       = new QPushButton("CSV'ye Kaydet...");
+    m_logBtn       = new QPushButton("CSV Kaydet");
 
     m_startLiveBtn->setMinimumHeight(34);
     m_stopLiveBtn->setMinimumHeight(34);
@@ -552,10 +571,24 @@ QWidget* MainWindow::createLiveDataTab()
     m_startLiveBtn->setEnabled(false);
     m_stopLiveBtn->setEnabled(false);
 
+    // Mod secici
+    m_modeCombo = new QComboBox();
+    m_modeCombo->addItem("TCM", (int)LiveDataManager::TCM_ONLY);
+    m_modeCombo->addItem("ECU", (int)LiveDataManager::ECU_ONLY);
+    m_modeCombo->addItem("TCM+ECU", (int)LiveDataManager::DUAL);
+    m_modeCombo->setCurrentIndex(2); // default DUAL
+    m_modeCombo->setMinimumHeight(34);
+    m_modeCombo->setStyleSheet("QComboBox{background:#1a2a3a;color:#88ff88;border:1px solid #3a6a9a;"
+                               "border-radius:3px;padding:2px 6px;font-weight:bold;}");
+    connect(m_modeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
+        m_liveData->setMode(static_cast<LiveDataManager::Mode>(m_modeCombo->itemData(idx).toInt()));
+    });
+    m_liveData->setMode(LiveDataManager::DUAL);
+
+    btnLayout->addWidget(m_modeCombo);
     btnLayout->addWidget(m_startLiveBtn);
     btnLayout->addWidget(m_stopLiveBtn);
     btnLayout->addWidget(m_logBtn);
-    btnLayout->addStretch();
 
     layout->addLayout(btnLayout);
 
@@ -878,13 +911,18 @@ QWidget* MainWindow::createLogTab()
 
     layout->addWidget(m_logText);
 
-    QHBoxLayout *logBtnLayout = new QHBoxLayout();
+    // --- Log butonlari: 2 satirlik grid ---
+    QGridLayout *logGrid = new QGridLayout();
+    logGrid->setSpacing(4);
+
+    // Satir 0: Temizle | Log Kaydet | Ham Veri Oku
     QPushButton *clearLogBtn = new QPushButton("Temizle");
+    clearLogBtn->setStyleSheet("padding:4px 6px;");
     connect(clearLogBtn, &QPushButton::clicked, m_logText, &QTextEdit::clear);
-    logBtnLayout->addWidget(clearLogBtn);
+    logGrid->addWidget(clearLogBtn, 0, 0);
 
     QPushButton *saveLogBtn = new QPushButton("Log Kaydet");
-    saveLogBtn->setStyleSheet("background:#2a3a2a; color:#88ff88; font-weight:bold; padding:4px 8px;");
+    saveLogBtn->setStyleSheet("background:#2a3a2a; color:#88ff88; font-weight:bold; padding:4px 6px;");
     connect(saveLogBtn, &QPushButton::clicked, this, [this]() {
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
         QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
@@ -902,39 +940,30 @@ QWidget* MainWindow::createLogTab()
             if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
                 f.write(m_logText->toPlainText().toUtf8());
                 f.close();
-                statusBar()->showMessage("Log kaydedildi: " + path);
+                statusBar()->showMessage("Log: " + path);
             }
         }
     });
-    logBtnLayout->addWidget(saveLogBtn);
+    logGrid->addWidget(saveLogBtn, 0, 1);
 
-    // --- Ham Bus Veri Dump butonu ---
-    m_rawDumpBtn = new QPushButton("Ham Veri Oku (TCM+ECU)");
-    m_rawDumpBtn->setStyleSheet("background:#2a4858; color:#00ffcc; font-weight:bold; padding:4px 12px;");
-    m_rawDumpBtn->setToolTip("TCM ve ECU'dan tum local ID'leri okuyup ham hex veriyi log'a basar");
+    m_rawDumpBtn = new QPushButton("Ham Veri");
+    m_rawDumpBtn->setStyleSheet("background:#2a4858; color:#00ffcc; font-weight:bold; padding:4px 6px;");
     connect(m_rawDumpBtn, &QPushButton::clicked, this, &MainWindow::onRawBusDump);
-    logBtnLayout->addWidget(m_rawDumpBtn);
+    logGrid->addWidget(m_rawDumpBtn, 0, 2);
 
-    logBtnLayout->addStretch();
-
-    // --- Manuel komut gonderme ---
-    QLabel *cmdLabel = new QLabel("Komut:");
-    cmdLabel->setStyleSheet("color:#aaa;");
-    logBtnLayout->addWidget(cmdLabel);
-
+    // Satir 1: Komut input + Gonder
     m_rawCmdEdit = new QLineEdit();
     m_rawCmdEdit->setPlaceholderText("21 01 veya ATRV");
-    m_rawCmdEdit->setMinimumWidth(100);
-    m_rawCmdEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_rawCmdEdit->setStyleSheet("background:#1a1a2e; color:#00ff00; border:1px solid #444; padding:3px;");
-    logBtnLayout->addWidget(m_rawCmdEdit);
+    logGrid->addWidget(m_rawCmdEdit, 1, 0, 1, 2);
 
     m_rawSendBtn = new QPushButton("Gonder");
-    m_rawSendBtn->setStyleSheet("background:#4a2858; color:#ff88ff; font-weight:bold; padding:4px 12px;");
+    m_rawSendBtn->setStyleSheet("background:#4a2858; color:#ff88ff; font-weight:bold; padding:4px 6px;");
     connect(m_rawSendBtn, &QPushButton::clicked, this, &MainWindow::onRawSendCustom);
     connect(m_rawCmdEdit, &QLineEdit::returnPressed, this, &MainWindow::onRawSendCustom);
-    logBtnLayout->addWidget(m_rawSendBtn);
-    layout->addLayout(logBtnLayout);
+    logGrid->addWidget(m_rawSendBtn, 1, 2);
+
+    layout->addLayout(logGrid);
 
     return w;
 }
@@ -1168,6 +1197,39 @@ void MainWindow::onFullStatusUpdated(const TCMDiagnostics::TCMStatus &status)
     updateStatusLabels(status);
 }
 
+void MainWindow::onECUDataUpdated(const TCMDiagnostics::ECUStatus &ecu)
+{
+    // Motor RPM
+    m_dashMotRpmVal->setText(QString::number(ecu.rpm, 'f', 0));
+    setGaugeColor(m_dashMotRpmVal,
+        ecu.rpm > 4500 ? "#ff4444" : ecu.rpm > 3500 ? "#ffaa00" : "#00ff88");
+
+    // Boost Pressure (mbar)
+    m_dashMotBoostVal->setText(QString::number(ecu.boostPressure, 'f', 0));
+    setGaugeColor(m_dashMotBoostVal,
+        ecu.boostPressure > 2000 ? "#ff4444" : ecu.boostPressure > 1500 ? "#ffaa00" : "#00ff88");
+
+    // MAF
+    m_dashMotMafVal->setText(QString::number(ecu.mafActual, 'f', 0));
+
+    // Rail Pressure (bar)
+    m_dashMotRailVal->setText(QString::number(ecu.railActual, 'f', 0));
+    setGaugeColor(m_dashMotRailVal,
+        ecu.railActual > 1400 ? "#ff4444" : ecu.railActual > 1200 ? "#ffaa00" : "#00ff88");
+
+    // Su sicakligi (Motor ECU'dan gelen coolant)
+    m_dashMotCoolVal->setText(QString::number(ecu.coolantTemp, 'f', 0));
+    setGaugeColor(m_dashMotCoolVal,
+        ecu.coolantTemp > 105 ? "#ff4444" : ecu.coolantTemp > 95 ? "#ffaa00" : "#00ff88");
+
+    // Battery voltage (ECU'dan)
+    if (ecu.batteryVoltage > 0) {
+        m_dashBatVoltVal->setText(QString::number(ecu.batteryVoltage, 'f', 1));
+        setGaugeColor(m_dashBatVoltVal,
+            ecu.batteryVoltage < 11.5 ? "#ff4444" : ecu.batteryVoltage < 12.5 ? "#ffaa00" : "#00ff88");
+    }
+}
+
 void MainWindow::onReadIO()
 {
     m_readIOBtn->setEnabled(false);
@@ -1202,20 +1264,25 @@ void MainWindow::updateStatusLabels(const TCMDiagnostics::TCMStatus &st)
     m_dashRpmVal->setText(QString::number(st.turbineRPM,'f',0));
     m_dashSpeedVal->setText(QString::number(st.vehicleSpeed,'f',0));
     m_dashSolVoltVal->setText(QString::number(st.solenoidSupply,'f',1));
-    m_dashBatVoltVal->setText(QString::number(st.solenoidSupply,'f',1)); // TCM'de aku yok, solenoid goster
     m_dashCoolantVal->setText(QString::number(st.transTemp,'f',0));      // Trans temp
-    m_dashBoostVal->setText(QString::number(st.tccPressure,'f',2));      // TCC pressure
-    m_dashMafVal->setText(QString::number(st.linePressure,'f',1));       // Shift PSI
+    m_dashBoostVal->setText(QString::number(st.tccPressure,'f',1));      // TCC pressure
+    m_dashMafVal->setText(QString::number(st.linePressure,'f',1));       // Modulation PSI
     m_dashMapVal->setText(QString::number(st.outputRPM,'f',0));          // Output RPM
-    m_dashPressVal->setText(QString::number(st.linePressure,'f',1));
+    m_dashPressVal->setText(QString::number(st.linePressure,'f',1));     // Shift PSI
     m_dashLimpVal->setText(st.limpMode ? "AKTIF!" : "Normal");
+    // Motor su sicakligi: coolantTemp alaninda ECU'dan gelir
+    if (st.coolantTemp > 0) {
+        m_dashMotCoolVal->setText(QString::number(st.coolantTemp,'f',0));
+        setGaugeColor(m_dashMotCoolVal,
+            st.coolantTemp>105?"#ff4444":st.coolantTemp>95?"#ffaa00":"#00ff88");
+    }
     setGaugeColor(m_dashLimpVal, st.limpMode ? "#ff4444" : "#00ff88");
     setGaugeColor(m_dashSolVoltVal,
         st.solenoidSupply<9.0?"#ff4444":st.solenoidSupply<11.0?"#ffaa00":"#00ff88");
     setGaugeColor(m_dashCoolantVal,
         st.transTemp>105?"#ff4444":st.transTemp>95?"#ffaa00":"#00ff88");
     setGaugeColor(m_dashBoostVal,
-        st.tccPressure>2.2?"#ff4444":st.tccPressure>1.8?"#ffaa00":"#00ff88");
+        st.tccPressure>20?"#ff4444":st.tccPressure>15?"#ffaa00":"#00ff88");
 }
 
 void MainWindow::updateActiveHeaderLabel()

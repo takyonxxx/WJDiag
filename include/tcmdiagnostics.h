@@ -82,6 +82,13 @@ public:
         double injCorr[5]={0,0,0,0,0};
         double boostPressure=0, boostSetpoint=0;
         double batteryVoltage=0;
+        // Block 0x62 fields
+        double egrDuty=0, wastegate=0;
+        double alternatorDuty=0;
+        bool glowPlug1=false, glowPlug2=false;
+        double coolantSensorV=0, iatSensorV=0;
+        double accelPedal1=0, accelPedal2=0;
+        double vehicleSpeed=0;
     };
 
     struct TCMStatus {

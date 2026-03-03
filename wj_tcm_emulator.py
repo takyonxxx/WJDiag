@@ -344,6 +344,17 @@ class KWP2000Responder:
             resp += rpm.to_bytes(2,'big') * 3
             resp += (rpm-2).to_bytes(2,'big') + rpm.to_bytes(2,'big')
             resp += bytes([0x00,0x00,0x00,0xCC,0xFF,0x3C,0x00,0x68,0xFF,0xFB,0xFF,0x94,0x00,0x00,0xF6])
+        elif local_id == 0x62:
+            # EGR, Wastegate, Glow Plug, MAF, Alternator blogu
+            egr_duty = 25   # %
+            wastegate = 50  # %
+            glow1 = 0       # off
+            glow2 = 0       # off
+            maf_mg = int(t.maf_sensor)
+            alt_duty = 70   # %
+            resp += bytes([egr_duty, wastegate, glow1, glow2])
+            resp += maf_mg.to_bytes(2,'big')
+            resp += bytes([alt_duty, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
         elif local_id == 0x26:
             resp += bytes(14) + bytes([0x5B,0x37,0x7F,0xFF,0x00,0x00,0x2F,0xA0])
             resp += bytes([0x00,0x29]*4) + bytes([0x00,0x48,0x00,0x23,0x00,0x00,0x0B,0x41])

@@ -10,6 +10,7 @@
 #include <QGroupBox>
 #include <QStatusBar>
 #include <QProgressBar>
+#include <QComboBox>
 #include <QFrame>
 #include "elm327connection.h"
 #include "kwp2000handler.h"
@@ -31,6 +32,7 @@ private slots:
     void onStopLiveData();
     void onLiveDataUpdated(const QMap<uint8_t,double>&);
     void onFullStatusUpdated(const TCMDiagnostics::TCMStatus&);
+    void onECUDataUpdated(const TCMDiagnostics::ECUStatus&);
     void onReadIO();
     void onLogMessage(const QString&);
     void onRawBusDump();
@@ -67,6 +69,7 @@ private:
     QPushButton *m_dtcTcmBtn,*m_dtcEcuBtn;
     bool m_dtcSourceECU = false; // false=TCM, true=ECU
     QTableWidget *m_liveTable; QPushButton *m_startLiveBtn,*m_stopLiveBtn,*m_logBtn;
+    QComboBox *m_modeCombo;
     QLabel *m_dashGearVal,*m_dashGearUnit;
     QLabel *m_dashSpeedVal,*m_dashSpeedUnit;
     QLabel *m_dashRpmVal,*m_dashRpmUnit;
@@ -77,7 +80,13 @@ private:
     QLabel *m_dashPressVal,*m_dashPressUnit;
     QLabel *m_dashSolVoltVal,*m_dashSolVoltUnit;
     QLabel *m_dashBatVoltVal,*m_dashBatVoltUnit;
+    QLabel *m_dashMotCoolVal,*m_dashMotCoolUnit;
     QLabel *m_dashLimpVal,*m_dashLimpUnit;
+    // Motor ECU gauges (Row 3)
+    QLabel *m_dashMotRpmVal,*m_dashMotRpmUnit;
+    QLabel *m_dashMotBoostVal,*m_dashMotBoostUnit;
+    QLabel *m_dashMotMafVal,*m_dashMotMafUnit;
+    QLabel *m_dashMotRailVal,*m_dashMotRailUnit;
     QProgressBar *m_throttleBar;
     QTableWidget *m_ioTable; QPushButton *m_readIOBtn;
     // ABS tab
