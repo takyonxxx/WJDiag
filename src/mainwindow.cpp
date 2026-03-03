@@ -11,6 +11,8 @@
 #include <QApplication>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QGuiApplication>
+#include <QClipboard>
 #include <QScreen>
 #include <QScrollArea>
 #include <QScroller>
@@ -540,7 +542,7 @@ QWidget* MainWindow::createLiveDataTab()
 
     m_startLiveBtn = new QPushButton("Baslat");
     m_stopLiveBtn  = new QPushButton("Durdur");
-    m_logBtn       = new QPushButton("CSV Kaydet");
+    m_logBtn       = new QPushButton("CSV Kopyala");
 
     m_startLiveBtn->setMinimumHeight(34);
     m_stopLiveBtn->setMinimumHeight(34);
@@ -627,27 +629,27 @@ QWidget* MainWindow::createLiveDataTab()
     connect(m_logBtn, &QPushButton::clicked, this, [this]() {
         if (m_liveData->isLogging()) {
             m_liveData->stopLogging();
-            m_logBtn->setText("CSV Kaydet");
-            statusBar()->showMessage("Log kaydedildi");
+            m_logBtn->setText("CSV Kopyala");
+            // Log bittikten sonra son dosyayi clipboard'a kopyala
+            if (!m_lastLogPath.isEmpty()) {
+                QFile f(m_lastLogPath);
+                if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                    QGuiApplication::clipboard()->setText(QString::fromUtf8(f.readAll()));
+                    f.close();
+                    statusBar()->showMessage("CSV kopyalandi - yapistirabilirsiniz");
+                }
+            }
         } else {
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-            // Mobil: Documents klasorune otomatik kaydet
-            QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+            // Gecici dosyaya kaydet (sonra clipboard'a kopyalanacak)
+            QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
             if (dir.isEmpty())
                 dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-            QString fname = "wjdiag_"
-                + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".csv";
-            QString path = dir + "/" + fname;
             QDir().mkpath(dir);
-#else
-            QString path = QFileDialog::getSaveFileName(
-                this, "Log Dosyasi Kaydet", "wjdiag_log.csv", "CSV (*.csv)");
-#endif
-            if (!path.isEmpty()) {
-                m_liveData->startLogging(path);
-                m_logBtn->setText("Kaydi Durdur");
-                statusBar()->showMessage("Log: " + path);
-            }
+            m_lastLogPath = dir + "/wjdiag_"
+                + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".csv";
+            m_liveData->startLogging(m_lastLogPath);
+            m_logBtn->setText("Durdur+Kopyala");
+            statusBar()->showMessage("CSV kaydediliyor...");
         }
     });
 
@@ -898,28 +900,17 @@ QWidget* MainWindow::createLogTab()
     connect(clearLogBtn, &QPushButton::clicked, m_logText, &QTextEdit::clear);
     logGrid->addWidget(clearLogBtn, 0, 0);
 
-    QPushButton *saveLogBtn = new QPushButton("Log Kaydet");
+    QPushButton *saveLogBtn = new QPushButton("Log Kopyala");
     saveLogBtn->setStyleSheet("background:#2a3a2a; color:#88ff88; font-weight:bold; padding:4px 6px;");
     connect(saveLogBtn, &QPushButton::clicked, this, [this]() {
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-        QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-        if (dir.isEmpty())
-            dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-        QDir().mkpath(dir);
-        QString path = dir + "/wjdiag_log_"
-            + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".txt";
-#else
-        QString path = QFileDialog::getSaveFileName(
-            this, "Log Kaydet", "wjdiag_comm.txt", "Text (*.txt)");
-#endif
-        if (!path.isEmpty()) {
-            QFile f(path);
-            if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                f.write(m_logText->toPlainText().toUtf8());
-                f.close();
-                statusBar()->showMessage("Log: " + path);
-            }
+        QString text = m_logText->toPlainText();
+        if (text.isEmpty()) {
+            statusBar()->showMessage("Log bos - kopyalanacak veri yok");
+            return;
         }
+        QGuiApplication::clipboard()->setText(text);
+        statusBar()->showMessage(QString("Log kopyalandi (%1 satir) - WhatsApp/Notes'a yapistirabilirsiniz")
+            .arg(text.count('\n') + 1));
     });
     logGrid->addWidget(saveLogBtn, 0, 1);
 
