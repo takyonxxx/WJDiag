@@ -66,16 +66,29 @@ class TCMState:
     tcc_status: int = 0          # 0=off, 1=slip, 2=locked
     adaptation_value: int = 128
     limp_mode: int = 0
+    # ECU motor params
+    coolant_temp: int = 130     # raw, gercek=(raw-40)=90C
+    turbo_boost: int = 120      # raw 2byte, gercek=raw*0.01=1.20 bar
+    maf_sensor: int = 250       # raw 2byte, gercek=raw*0.1=25.0 g/s
+    map_sensor: int = 150       # raw 2byte, gercek=raw*1.0=150 kPa
 
-    # DTC listesi: [(high_byte, low_byte, status), ...]
-    dtc_list: list = field(default_factory=lambda: [
-        # P2602 - Selenoid voltaj aralık dışı (aktif)
-        (0x26, 0x02, 0x01),
-        # P0715 - Türbin hız sensörü (kayıtlı, 2 tekrar)
-        (0x07, 0x15, 0x28),
-        # P0562 - Sistem voltajı düşük (kayıtlı, 1 tekrar)
-        (0x05, 0x62, 0x18),
+    # Motor sensörleri (CAN üzerinden)
+    turbo_boost: int = 1200      # Raw (gercek = raw * 0.01), 1200 => 12.00 bar (1.2 bar boost)
+    maf_sensor: int = 250        # Raw (gercek = raw * 0.1), 250 => 25.0 g/s
+    map_sensor: int = 150        # Raw (gercek = raw * 1.0), 150 => 150 kPa
+
+    # TCM DTC listesi: [(high_byte, low_byte, status), ...]
+    tcm_dtc_list: list = field(default_factory=lambda: [
+        (0x26, 0x02, 0x01),  # P2602 Selenoid voltaj (aktif)
+        (0x07, 0x15, 0x28),  # P0715 Turbin hiz sensoru (kayitli)
+        (0x07, 0x00, 0x18),  # P0700 Sanziman kontrol arizasi
     ])
+    ecu_dtc_list: list = field(default_factory=lambda: [
+        (0x03, 0x80, 0x01),  # P0380 Isitma devresi (aktif)
+        (0x11, 0x30, 0x18),  # P1130 Yakit basinci kacak (kayitli)
+        (0x01, 0x10, 0x28),  # P0110 Emis havasi sicaklik (kayitli)
+    ])
+    active_target: int = 0x10  # 0x10=TCM, 0x15=ECU (Bosch EDC15C2)
 
     # I/O durumları (bit mask)
     io_states: bytes = b'\x00\x00\x00\x00'
@@ -124,14 +137,17 @@ class TCMState:
         self.mod_pwm = 128 + random.randint(-5, 5)
         self.spc_pwm = 150 + random.randint(-5, 5)
 
-        # I/O: Park + Fren aktif (varsayılan)
+        # I/O: Park + Fren aktif
         self.io_states = bytes([
-            0x00,  # selenoidler kapalı
-            0x00,
-            0x41,  # bit0=P konumu, bit6=fren
-            0x00,
+            0x00, 0x00, 0x41, 0x00,
         ])
 
+        # ECU motor simulasyonu
+        base_cool = 130 + int(5 * math.sin(t * 0.02))
+        self.coolant_temp = max(80, min(160, base_cool))
+        self.turbo_boost = 50 + int(self.throttle_pos * 1.5) + random.randint(-5, 5)
+        self.maf_sensor = max(0, int(self.engine_rpm * 0.05) + random.randint(-10, 10))
+        self.map_sensor = max(0, 100 + int(self.turbo_boost * 0.3) + random.randint(-5, 5))
 
 # ─────────────────────────────────────────────
 # KWP2000 Response Builder
@@ -191,7 +207,7 @@ class KWP2000Responder:
     def _read_dtc(self, data: bytes) -> bytes:
         """ReadDTCByStatus (SID 0x18)."""
         self.tcm.tick()
-        dtcs = self.tcm.dtc_list
+        dtcs = self.tcm.ecu_dtc_list if self.tcm.active_target == 0x15 else self.tcm.tcm_dtc_list
         # Positive: 0x58, count, [high, low, status]...
         resp = bytes([0x58, len(dtcs)])
         for h, l, s in dtcs:
@@ -205,7 +221,12 @@ class KWP2000Responder:
 
     def _clear_dtc(self, data: bytes) -> bytes:
         """ClearDiagnosticInformation (SID 0x14)."""
-        self.tcm.dtc_list.clear()
+        if self.tcm.active_target == 0x15:
+            self.tcm.ecu_dtc_list.clear()
+            log.info("ECU DTC temizlendi")
+        else:
+            self.tcm.tcm_dtc_list.clear()
+            log.info("TCM DTC temizlendi")
         log.info("DTC'ler temizlendi")
         return bytes([0x54, 0xFF, 0xFF])
 
@@ -237,6 +258,10 @@ class KWP2000Responder:
         local_id = data[0]
         self.tcm.tick()
 
+        # ECU Motor (0x15) - Bosch EDC15C2
+        if self.tcm.active_target == 0x15:
+            return self._read_ecu_local_data(local_id)
+
         # Positive response: 0x61, localID, value_bytes...
         resp = bytes([0x61, local_id])
 
@@ -257,6 +282,7 @@ class KWP2000Responder:
             0x14: self.tcm.tcc_status,
             0x15: self.tcm.adaptation_value,
             0x16: self.tcm.limp_mode,
+            0x20: self.tcm.coolant_temp,
         }
 
         value_map_2byte = {
@@ -266,6 +292,9 @@ class KWP2000Responder:
             0x07: int(self.tcm.vehicle_speed),
             0x0C: self.tcm.engine_torque,
             0x0D: self.tcm.tc_slip,
+            0x21: self.tcm.turbo_boost,
+            0x22: self.tcm.maf_sensor,
+            0x23: self.tcm.map_sensor,
         }
 
         if local_id in value_map_1byte:
@@ -280,6 +309,47 @@ class KWP2000Responder:
         else:
             return bytes([0x7F, 0x21, 0x31])  # requestOutOfRange
 
+        return resp
+
+    def _read_ecu_local_data(self, local_id):
+        """Motor ECU (Bosch EDC15C2) local data. Based on real WJ 2.7 CRD test vectors."""
+        t = self.tcm
+        resp = bytes([0x61, local_id])
+        if local_id == 0x12:
+            craw = int((t.coolant_temp - 40 + 273.1) * 10)
+            iraw = int((25 + 273.1) * 10)
+            traw = int(t.throttle_pos * 100)
+            mraw = t.map_sensor
+            resp += craw.to_bytes(2,'big') + iraw.to_bytes(2,'big')
+            resp += bytes([0x08,0xB7,0x08,0xB7,0x00,0x00,0x02,0xFD,0x0B,0xA1])
+            resp += traw.to_bytes(2,'big') + mraw.to_bytes(2,'big')
+            resp += bytes([0x0B,0xBB,0x01,0x32,0x01,0x2B,0x00,0x6F,0x09,0x7F])
+            resp += (1013).to_bytes(2,'big') + bytes([0x00,0x00])
+        elif local_id == 0x20:
+            maf_a = int(t.maf_sensor)
+            maf_s = int(maf_a * 0.85)
+            resp += bytes([0x03,0x5A,0x03,0x3C,0x03,0xFE,0x00,0x01,0x00,0x94,0x00,0x4A])
+            resp += maf_a.to_bytes(2,'big') + maf_s.to_bytes(2,'big')
+            resp += bytes([0x01,0x0C,0x03,0x02,0x02,0x66,0x00,0x84,0x00,0x5C,0x03,0xA0,0x03,0x03])
+        elif local_id == 0x22:
+            rspec = int(t.turbo_boost * 25)
+            mspec = t.map_sensor - 1
+            resp += bytes([0x0B,0x43,0x0A,0xDD,0x08,0xB7,0x08,0xB7,0x00,0x00,0x00,0x00,0x02,0x43])
+            resp += mspec.to_bytes(2,'big') + rspec.to_bytes(2,'big')
+            resp += bytes([0x03,0xB8,0x02,0x67,0x02,0xE4,0x02,0xE4,0x02,0x85,0x08,0xB7,0x00,0x0C])
+        elif local_id == 0x28:
+            rpm = int(t.engine_rpm)
+            iq = int(t.throttle_pos * 12)
+            resp += rpm.to_bytes(2,'big') + iq.to_bytes(2,'big')
+            resp += rpm.to_bytes(2,'big') * 3
+            resp += (rpm-2).to_bytes(2,'big') + rpm.to_bytes(2,'big')
+            resp += bytes([0x00,0x00,0x00,0xCC,0xFF,0x3C,0x00,0x68,0xFF,0xFB,0xFF,0x94,0x00,0x00,0xF6])
+        elif local_id == 0x26:
+            resp += bytes(14) + bytes([0x5B,0x37,0x7F,0xFF,0x00,0x00,0x2F,0xA0])
+            resp += bytes([0x00,0x29]*4) + bytes([0x00,0x48,0x00,0x23,0x00,0x00,0x0B,0x41])
+        else:
+            return bytes([0x7F, 0x21, 0x31])
+        log.info("ECU 21 %02X: %d bytes", local_id, len(resp))
         return resp
 
     def _read_common_data(self, data: bytes) -> bytes:
@@ -340,6 +410,7 @@ class ELM327Emulator:
         self.linefeed = True
         self.protocol = 3  # ISO 9141-2
         self.header_bytes = bytes([0x81, 0x10, 0xF1])
+        self.tcm_state = self.kwp.tcm
 
     def process_command(self, raw: str) -> str:
         """Bir ELM327 komutunu işle, yanıt döndür."""
@@ -423,7 +494,9 @@ class ELM327Emulator:
             hex_str = at[2:]
             try:
                 self.header_bytes = bytes.fromhex(hex_str)
-                log.info("Header: %s", hex_str)
+                target = self.header_bytes[1] if len(self.header_bytes) >= 2 else 0x10
+                self.tcm_state.active_target = target
+                log.info("Header: %s -> target=0x%02X", hex_str, target)
             except ValueError:
                 pass
             return "OK"
@@ -435,10 +508,30 @@ class ELM327Emulator:
 
         # ATDP - Describe protocol
         if at == "DP":
-            return "ISO 9141-2"
+            if self.protocol == 5:
+                return "ISO 14230-4 (KWP 5BAUD)"
+            elif self.protocol == 3:
+                return "ISO 9141-2"
+            return "AUTO, ISO 9141-2"
 
         # ATSI - Slow init (5-baud)
         if at == "SI":
+            return "OK"
+
+        # ATFI - Fast init (genuine ELM327 feature)
+        if at == "FI":
+            log.info("Fast init (ATFI) - genuine ELM emulated")
+            return "OK"
+
+        # ATWM - Wakeup message (genuine ELM327 feature)
+        if at.startswith("WM"):
+            wm_hex = at[2:]
+            log.info("Wakeup message set: %s", wm_hex)
+            return "OK"
+
+        # ATST - Set timeout
+        if at.startswith("ST"):
+            log.info("Timeout set: %s", at[2:])
             return "OK"
 
         # Bilinmeyen AT -> OK

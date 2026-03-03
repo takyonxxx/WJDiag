@@ -1,4 +1,4 @@
-#include "elm327connection.h"
+﻿#include "elm327connection.h"
 #include <QDebug>
 #include <QRegularExpression>
 
@@ -207,65 +207,109 @@ void ELM327Connection::setState(ConnectionState state)
 
 void ELM327Connection::initializeELM()
 {
+    m_genuineELM = true;
+
     // 1) Reset
     sendCommand("ATZ", [this](const QString &resp) {
         m_elmVersion = resp;
-        emit logMessage("ELM327 Versiyon: " + resp);
+        emit logMessage("ELM327 Version: " + resp);
+        if (resp.contains("OBDII") || resp.contains("vLinker") ||
+            resp.toLower().contains("clone")) {
+            m_genuineELM = false;
+            emit logMessage("WARNING: Non-standard ELM327 detected");
+        }
     }, 5000);
 
-    // 2) Echo kapalı
+    // 2) Echo off
     sendCommand("ATE0", nullptr);
 
-    // 3) Linefeed kapalı
+    // 3) Linefeed off
     sendCommand("ATL0", nullptr);
 
-    // 4) Boşlukları kapat (daha kolay parse)
+    // 4) Spaces off
     sendCommand("ATS0", nullptr);
 
-    // 5) Header'ları göster (diagnostik için önemli)
+    // 5) Headers on
     sendCommand("ATH1", nullptr);
 
-    // 6) Adaptive timing
+    // 6) Adaptive timing auto2
     sendCommand("ATAT2", nullptr);
 
-    // 7) Voltaj oku
+    // 7) Timeout 400ms (0x64 * 4ms)
+    sendCommand("ATST64", nullptr);
+
+    // 8) Battery voltage
     sendCommand("ATRV", [this](const QString &resp) {
         m_elmVoltage = resp;
-        emit logMessage("Akü voltajı: " + resp);
+        emit logMessage("Battery voltage: " + resp);
     });
 
-    // 8) WJ 2.7 CRD TCM için: K-Line ISO 9141-2 (Protocol 3)
-    sendCommand(QString("ATSP%1").arg(static_cast<int>(m_protocol)),
-                [this](const QString &resp) {
+    // 9) Protocol: KWP fast init (ATSP5) - jeepswj.com uses this
+    sendCommand("ATSP5", [this](const QString &resp) {
         if (resp.contains("OK")) {
-            emit logMessage("Protokol ISO 9141-2 (K-Line) ayarlandı");
+            emit logMessage("Protocol: ISO 14230-4 KWP fast init (ATSP5)");
+            m_protocol = Protocol::KWP_FAST;
+        } else {
+            emit logMessage("ATSP5 failed, will fallback to ATSP3");
         }
     });
 
-    // 9) TCM adresi ayarla - WJ TCM receive address
-    // NAG1 TCM tipik olarak 0x02 veya Mercedes EGS adresi kullanır
-    // WJ 2.7 CRD TCM K-Line hedef adresi
+    // 10) Test ATFI (fast init) - genuine ELM327 only
+    sendCommand("ATFI", [this](const QString &resp) {
+        if (resp.contains("?") || resp.contains("ERROR")) {
+            m_genuineELM = false;
+            emit logMessage("ATFI not supported - fake/clone ELM327");
+            m_protocol = Protocol::ISO_9141;
+        } else {
+            emit logMessage("ATFI OK - genuine ELM327");
+        }
+    });
+
+    // 11) Describe protocol + fallback if needed
+    sendCommand("ATDP", [this](const QString &resp) {
+        emit logMessage("Active protocol: " + resp);
+        if (m_protocol == Protocol::ISO_9141) {
+            sendCommand("ATSP3", [this](const QString &r) {
+                if (r.contains("OK"))
+                    emit logMessage("Fallback: ISO 9141-2 (ATSP3)");
+            });
+        }
+    });
+
+    // 12) Wakeup message: TesterPresent to TCM (keep-alive)
+    // ATWM 81 10 F1 3E = TesterPresent(3E) to TCM(10) from F1
+    sendCommand("ATWM8110F13E", [this](const QString &resp) {
+        if (resp.contains("OK")) {
+            emit logMessage("Wakeup message: TesterPresent to TCM");
+        } else if (resp.contains("?")) {
+            m_genuineELM = false;
+            emit logMessage("ATWM not supported - fake/clone ELM327");
+        }
+    });
+
+    // 13) TCM header: 81 10 F1
     sendCommand("ATSH8110F1", [this](const QString &resp) {
-        // 81 = ISO format byte (1 byte header, no length)
-        // 10 = TCM/EGS hedef adresi
-        // F1 = Tester adresi (scan tool)
-        if (resp.contains("OK")) {
-            emit logMessage("TCM header ayarlandı: 81 10 F1");
-        }
+        if (resp.contains("OK"))
+            emit logMessage("TCM header: 81 10 F1");
     });
 
-    // 10) Slow init - K-Line 5-baud init for TCM
+    // 14) 5-baud init address for TCM
     sendCommand("ATIIA10", [this](const QString &resp) {
         Q_UNUSED(resp)
-        emit logMessage("Init adresi TCM (0x10) olarak ayarlandı");
+        emit logMessage("Init address: 0x10 (TCM)");
     });
 
-    // 11) Hazır sinyali
+    // 15) Ready
     sendCommand("ATI", [this](const QString &resp) {
         Q_UNUSED(resp)
         setState(ConnectionState::Ready);
         emit connected();
-        emit logMessage("ELM327 hazır - TCM iletişimi başlayabilir");
+        if (m_genuineELM) {
+            emit logMessage("ELM327 ready - genuine chip, full feature support");
+        } else {
+            emit logMessage("ELM327 ready - WARNING: clone/fake, limited features");
+            emit fakeELMDetected("ATFI or ATWM not supported");
+        }
     });
 }
 

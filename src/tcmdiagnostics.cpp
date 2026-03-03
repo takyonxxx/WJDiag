@@ -1,4 +1,4 @@
-#include "tcmdiagnostics.h"
+﻿#include "tcmdiagnostics.h"
 #include <QDebug>
 
 TCMDiagnostics::TCMDiagnostics(ELM327Connection *elm, QObject *parent)
@@ -52,6 +52,12 @@ void TCMDiagnostics::initLiveDataParams()
         {0x14, "TCC Durumu",                   "",      0,   3,  1.0,    0, 1, false},
         {0x15, "Adaptasyon Değeri",            "",      0, 255,  1.0,    0, 1, false},
         {0x16, "Limp Mode Durumu",             "",      0,   1,  1.0,    0, 1, false},
+
+        // Motor sensörleri (CAN üzerinden TCM'e gelen - localID 0x20+ TCM tarafinda)
+        {0x20, "Su Sicakligi (TCM CAN)",      "C",    -40, 150, 1.0, -40, 1, false},
+        {0x21, "Turbo Boost Basinci",          "bar",   0,  30,  0.01,  0, 2, false},
+        {0x22, "MAF Sensoru (TCM CAN)",        "g/s",   0, 500,  0.1,   0, 2, false},
+        {0x23, "MAP Sensoru (TCM CAN)",        "kPa",   0, 300,  1.0,   0, 2, false},
     };
 }
 
@@ -207,6 +213,44 @@ void TCMDiagnostics::readAllLiveData(std::function<void(const TCMStatus&)> callb
     (*readNext)();
 }
 
+void TCMDiagnostics::readECULiveData(std::function<void(const ECUStatus&)> callback)
+{
+    // Motor ECU (Bosch EDC15C2 OM612) live data okuma
+    // Java wgdiag test vektorlerinden dogrulanmis local ID'ler:
+    //   21 12 = Misc (coolant, IAT, TPS, MAP, AAP)
+    //   21 20 = MAF (actual, specified)
+    //   21 22 = Rail pressure spec, MAP spec
+    //   21 28 = RPM, IQ, 5x injector corrections
+    // Her biri 28-32 byte blok yanit doner
+
+    auto ecu = std::make_shared<ECUStatus>();
+    auto step = std::make_shared<int>(0);
+    auto doNext = std::make_shared<std::function<void()>>();
+
+    // Oncelikle ECU header'a gecis
+    *doNext = [this, ecu, step, doNext, callback]() {
+        uint8_t ids[] = {0x12, 0x20, 0x22, 0x28};
+        if (*step >= 4) {
+            // Tum bloklar okundu
+            m_lastECUStatus = *ecu;
+            emit ecuStatusUpdated(*ecu);
+            if (callback) callback(*ecu);
+            return;
+        }
+        uint8_t lid = ids[*step];
+        m_kwp->readLocalData(lid, [this, ecu, step, doNext, lid](const QByteArray &data) {
+            if (!data.isEmpty()) {
+                parseECUBlock(lid, data, *ecu);
+            }
+            (*step)++;
+            QTimer::singleShot(30, *doNext);
+        });
+    };
+
+    // Header switch sonra oku
+    switchToECU([doNext]() { (*doNext)(); });
+}
+
 void TCMDiagnostics::readSingleParam(uint8_t localID,
                                       std::function<void(double)> callback)
 {
@@ -349,4 +393,97 @@ TCMDiagnostics::Gear TCMDiagnostics::decodeGear(uint8_t raw)
     case 7: return Gear::Drive5;
     default: return Gear::Limp;
     }
+}
+
+void TCMDiagnostics::parseECUBlock(uint8_t localID, const QByteArray &d, ECUStatus &ecu)
+{
+    int n = d.size();
+    auto u8 = [&](int i) -> uint8_t { return (i < n) ? static_cast<uint8_t>(d[i]) : 0; };
+    auto u16 = [&](int i) -> uint16_t { return (uint16_t(u8(i)) << 8) | u8(i+1); };
+    auto s16 = [&](int i) -> int16_t { return static_cast<int16_t>(u16(i)); };
+
+    switch (localID) {
+    case 0x12: {
+        // 21 12: Misc - coolant, IAT, TPS, MAP, AAP
+        // Java test: coolant=15C, IAT=5C, TPS=30%, MAP=942mbar, AAP=928mbar
+        if (n >= 34) {
+            ecu.coolantTemp = u16(2) / 10.0 - 273.1;
+            ecu.iat = u16(4) / 10.0 - 273.1;
+            ecu.mapActual = u16(18);
+            ecu.aap = u16(30);
+            ecu.tps = u16(16) / 19.53;
+            emit logMessage(QString("ECU 21 12: coolant=%1C IAT=%2C MAP=%3 TPS=%4%")
+                .arg(ecu.coolantTemp,0,'f',1).arg(ecu.iat,0,'f',1)
+                .arg(ecu.mapActual).arg(ecu.tps,0,'f',1));
+        }
+        break;
+    }
+    case 0x20: {
+        // 21 20: MAF actual/specified
+        // Java test: maf_actual=435, maf_spec=366
+        // Offset [14-15]=actual, [16-17]=spec
+        if (n >= 18) {
+            ecu.mafActual = u16(14);
+            ecu.mafSpec = u16(16);
+            emit logMessage(QString("ECU 21 20: MAF actual=%1 spec=%2")
+                .arg(ecu.mafActual).arg(ecu.mafSpec));
+        }
+        break;
+    }
+    case 0x22: {
+        // 21 22: Rail pressure + MAP spec
+        // Java test: rail_actual=300.3bar, rail_spec=302.1bar
+        if (n >= 34) {
+            ecu.railSpec = u16(18) / 10.0;
+            ecu.mapSpec = u16(16);
+            emit logMessage(QString("ECU 21 22: rail_spec=%1bar MAP_spec=%2")
+                .arg(ecu.railSpec,0,'f',1).arg(ecu.mapSpec));
+        }
+        break;
+    }
+    case 0x28: {
+        // 21 28: RPM, IQ, injector corrections
+        // Java test: rpm=750, iq=8.12mg
+        // [2-3]=RPM, [4-5]=IQ*100, [18-27]=5x signed inj corrections /100
+        if (n >= 28) {
+            ecu.rpm = u16(2);
+            ecu.injectionQty = u16(4) / 100.0;
+            for (int i = 0; i < 5; i++)
+                ecu.injCorr[i] = s16(18 + i*2) / 100.0;
+            emit logMessage(QString("ECU 21 28: RPM=%1 IQ=%2mg inj=[%3,%4,%5,%6,%7]")
+                .arg(ecu.rpm).arg(ecu.injectionQty,0,'f',1)
+                .arg(ecu.injCorr[0],0,'f',2).arg(ecu.injCorr[1],0,'f',2)
+                .arg(ecu.injCorr[2],0,'f',2).arg(ecu.injCorr[3],0,'f',2)
+                .arg(ecu.injCorr[4],0,'f',2));
+        }
+        break;
+    }
+    default: break;
+    }
+}
+
+void TCMDiagnostics::switchToTCM(std::function<void()> done)
+{
+    if(!m_onECU){if(done)done();return;}
+    emit logMessage("Header TCM: ATSH8110F1");
+    m_elm->sendCommand("ATSH8110F1",[this,done](const QString&){
+        m_elm->sendCommand("ATWM8110F13E",[this,done](const QString&){
+            m_onECU=false;
+            emit logMessage("TCM header + wakeup aktif");
+            if(done)done();
+        });
+    });
+}
+void TCMDiagnostics::switchToECU(std::function<void()> done)
+{
+    if(m_onECU){if(done)done();return;}
+    emit logMessage("Header ECU: ATSH8115F1");
+    m_elm->sendCommand("ATSH8115F1",[this,done](const QString&){
+        // Update wakeup message for ECU keep-alive
+        m_elm->sendCommand("ATWM8115F13E",[this,done](const QString&){
+            m_onECU=true;
+            emit logMessage("ECU header + wakeup aktif");
+            if(done)done();
+        });
+    });
 }

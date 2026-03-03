@@ -1,4 +1,4 @@
-#include "livedata.h"
+﻿#include "livedata.h"
 #include <QFile>
 #include <QTextStream>
 #include <QDateTime>

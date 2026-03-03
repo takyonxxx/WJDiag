@@ -76,6 +76,7 @@ public:
     // ELM327 bilgileri
     QString elmVersion() const { return m_elmVersion; }
     QString elmVoltage() const { return m_elmVoltage; }
+    bool isGenuineELM() const { return m_genuineELM; }
 
 signals:
     void connected();
@@ -84,6 +85,7 @@ signals:
     void errorOccurred(const QString &error);
     void rawDataReceived(const QByteArray &data);
     void logMessage(const QString &msg);
+    void fakeELMDetected(const QString &reason);
 
 private slots:
     void onSocketConnected();
@@ -113,4 +115,5 @@ private:
 
     QString m_elmVersion;
     QString m_elmVoltage;
+    bool m_genuineELM = true;
 };
