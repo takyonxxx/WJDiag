@@ -202,43 +202,46 @@ void MainWindow::setGaugeColor(QLabel *vl, const QString &c) {
 
 void MainWindow::updateDashboardFromLiveData(const QMap<uint8_t, double> &v)
 {
-    // TCM params
+    // TCM J1850 VPW PIDs (APK referansi)
     if(v.contains(0x01)){
         int g=(int)v[0x01];
         m_dashGearVal->setText(gearToString((TCMDiagnostics::Gear)g));
         setGaugeColor(m_dashGearVal, g>=3 ? "#00ff88" : "#ffcc44");
     }
-    if(v.contains(0x07)) m_dashSpeedVal->setText(QString::number(v[0x07],'f',0));
-    if(v.contains(0x04)) m_dashRpmVal->setText(QString::number(v[0x04],'f',0));
-    if(v.contains(0x0E)) m_dashPressVal->setText(QString::number(v[0x0E],'f',1));
-    if(v.contains(0x09)){
-        double sv=v[0x09];
+    if(v.contains(0x20)) m_dashSpeedVal->setText(QString::number(v[0x20],'f',0));       // Vehicle Speed
+    if(v.contains(0x10)) m_dashRpmVal->setText(QString::number(v[0x10],'f',0));          // Turbine RPM
+    if(v.contains(0x23)) m_dashPressVal->setText(QString::number(v[0x23],'f',1));        // Shift PSI
+    if(v.contains(0x16)){                                                                 // Solenoid Supply
+        double sv=v[0x16];
         m_dashSolVoltVal->setText(QString::number(sv,'f',1));
         setGaugeColor(m_dashSolVoltVal, sv<9.0?"#ff4444":sv<11.0?"#ffaa00":"#00ff88");
     }
-    if(v.contains(0x0A)){
-        double bv=v[0x0A];
-        m_dashBatVoltVal->setText(QString::number(bv,'f',1));
-        setGaugeColor(m_dashBatVoltVal, bv<11.5?"#ff4444":bv<12.5?"#ffaa00":"#00ff88");
+    // Aku voltaji TCM J1850'de yok, solenoid supply'i goster
+    if(!v.contains(0x16) && v.contains(0x16)){
+        m_dashBatVoltVal->setText(QString::number(v[0x16],'f',1));
     }
-    if(v.contains(0x16)){
-        bool l=v[0x16]>0;
+    // Limp mode: max gear <= 2 ise limp
+    if(v.contains(0x03)){
+        bool l = v[0x03] <= 2 && v.value(0x14, 0) > 100;
         m_dashLimpVal->setText(l?"AKTIF!":"Normal");
         setGaugeColor(m_dashLimpVal, l?"#ff4444":"#00ff88");
     }
-    // ECU params
-    if(v.contains(0x20)){
-        double ct=v[0x20];
+    // Trans temp -> coolant gauge'unda goster
+    if(v.contains(0x14)){
+        double ct=v[0x14];
         m_dashCoolantVal->setText(QString::number(ct,'f',0));
         setGaugeColor(m_dashCoolantVal, ct>105?"#ff4444":ct>95?"#ffaa00":"#00ff88");
     }
-    if(v.contains(0x21)){
-        double tb=v[0x21];
+    // TCC Pressure -> boost gauge'unda goster
+    if(v.contains(0x15)){
+        double tb=v[0x15];
         m_dashBoostVal->setText(QString::number(tb,'f',2));
         setGaugeColor(m_dashBoostVal, tb>2.2?"#ff4444":tb>1.8?"#ffaa00":"#00ff88");
     }
-    if(v.contains(0x22)) m_dashMafVal->setText(QString::number(v[0x22],'f',1));
-    if(v.contains(0x23)) m_dashMapVal->setText(QString::number(v[0x23],'f',0));
+    // Modulation PSI -> MAF gauge'unda goster
+    if(v.contains(0x24)) m_dashMafVal->setText(QString::number(v[0x24],'f',1));
+    // Output RPM -> MAP gauge'unda goster
+    if(v.contains(0x13)) m_dashMapVal->setText(QString::number(v[0x13],'f',0));
 }
 
 QWidget* MainWindow::createConnectionTab()
@@ -1152,21 +1155,21 @@ void MainWindow::updateStatusLabels(const TCMDiagnostics::TCMStatus &st)
     m_dashGearVal->setText(gearToString(st.currentGear));
     m_dashRpmVal->setText(QString::number(st.turbineRPM,'f',0));
     m_dashSpeedVal->setText(QString::number(st.vehicleSpeed,'f',0));
-    m_dashSolVoltVal->setText(QString::number(st.solenoidVoltage,'f',1));
-    m_dashBatVoltVal->setText(QString::number(st.batteryVoltage,'f',1));
-    m_dashCoolantVal->setText(QString::number(st.coolantTemp,'f',0));
-    m_dashBoostVal->setText(QString::number(st.turboBoost,'f',2));
-    m_dashMafVal->setText(QString::number(st.mafSensor,'f',1));
-    m_dashMapVal->setText(QString::number(st.mapSensor,'f',0));
+    m_dashSolVoltVal->setText(QString::number(st.solenoidSupply,'f',1));
+    m_dashBatVoltVal->setText(QString::number(st.solenoidSupply,'f',1)); // TCM'de aku yok, solenoid goster
+    m_dashCoolantVal->setText(QString::number(st.transTemp,'f',0));      // Trans temp
+    m_dashBoostVal->setText(QString::number(st.tccPressure,'f',2));      // TCC pressure
+    m_dashMafVal->setText(QString::number(st.linePressure,'f',1));       // Shift PSI
+    m_dashMapVal->setText(QString::number(st.outputRPM,'f',0));          // Output RPM
     m_dashPressVal->setText(QString::number(st.linePressure,'f',1));
     m_dashLimpVal->setText(st.limpMode ? "AKTIF!" : "Normal");
     setGaugeColor(m_dashLimpVal, st.limpMode ? "#ff4444" : "#00ff88");
     setGaugeColor(m_dashSolVoltVal,
-        st.solenoidVoltage<9.0?"#ff4444":st.solenoidVoltage<11.0?"#ffaa00":"#00ff88");
+        st.solenoidSupply<9.0?"#ff4444":st.solenoidSupply<11.0?"#ffaa00":"#00ff88");
     setGaugeColor(m_dashCoolantVal,
-        st.coolantTemp>105?"#ff4444":st.coolantTemp>95?"#ffaa00":"#00ff88");
+        st.transTemp>105?"#ff4444":st.transTemp>95?"#ffaa00":"#00ff88");
     setGaugeColor(m_dashBoostVal,
-        st.turboBoost>2.2?"#ff4444":st.turboBoost>1.8?"#ffaa00":"#00ff88");
+        st.tccPressure>2.2?"#ff4444":st.tccPressure>1.8?"#ffaa00":"#00ff88");
 }
 
 void MainWindow::updateActiveHeaderLabel()
