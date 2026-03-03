@@ -316,15 +316,31 @@ class KWP2000Responder:
         t = self.tcm
         resp = bytes([0x61, local_id])
         if local_id == 0x12:
+            # Block 0x12 layout (Java Packages.java verified):
+            #   [0-1] 61 12  (SID+localID)
+            #   [2-3] Coolant raw  (raw/10 - 273.1 = Celsius)
+            #   [4-5] IAT raw      (raw/10 - 273.1 = Celsius)
+            #   [6-13] 8 bytes (boost voltages, sensor data)
+            #   [14-15] TPS raw    (raw/100 = %)
+            #   [16-17] gap
+            #   [18-19] MAP actual (mbar)
+            #   [20-21] Rail pressure actual (raw/10 = bar)
+            #   [22-29] 8 bytes gap
+            #   [30-31] AAP / Barometric (mbar)
+            #   [32-33] padding
             craw = int((t.coolant_temp - 40 + 273.1) * 10)
             iraw = int((25 + 273.1) * 10)
             traw = int(t.throttle_pos * 100)
             mraw = t.map_sensor
-            resp += craw.to_bytes(2,'big') + iraw.to_bytes(2,'big')
-            resp += bytes([0x08,0xB7,0x08,0xB7,0x00,0x00,0x02,0xFD,0x0B,0xA1])
-            resp += traw.to_bytes(2,'big') + mraw.to_bytes(2,'big')
-            resp += bytes([0x0B,0xBB,0x01,0x32,0x01,0x2B,0x00,0x6F,0x09,0x7F])
-            resp += (1013).to_bytes(2,'big') + bytes([0x00,0x00])
+            rail_raw = int(t.turbo_boost * 100)  # bar * 10
+            resp += craw.to_bytes(2,'big') + iraw.to_bytes(2,'big')  # byte 2-5
+            resp += bytes([0x08,0xB7,0x08,0xB7,0x00,0x00,0x02,0xFD])  # byte 6-13 (8B)
+            resp += traw.to_bytes(2,'big')                             # byte 14-15 TPS
+            resp += bytes([0x0B,0xBB])                                 # byte 16-17 gap
+            resp += mraw.to_bytes(2,'big')                             # byte 18-19 MAP
+            resp += rail_raw.to_bytes(2,'big')                         # byte 20-21 Rail
+            resp += bytes([0x01,0x32,0x01,0x2B,0x00,0x6F,0x09,0x7F])  # byte 22-29
+            resp += (1013).to_bytes(2,'big') + bytes([0x00,0x00])      # byte 30-33 AAP
         elif local_id == 0x20:
             maf_a = int(t.maf_sensor)
             maf_s = int(maf_a * 0.85)

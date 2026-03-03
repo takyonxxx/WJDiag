@@ -429,12 +429,14 @@ void WJDiagnostics::parseECUBlock(uint8_t localID, const QByteArray &d, ECUStatu
         if (n >= 34) {
             ecu.coolantTemp = u16(2) / 10.0 - 273.1;
             ecu.iat = u16(4) / 10.0 - 273.1;
-            ecu.mapActual = u16(18);
-            ecu.aap = u16(30);
-            ecu.tps = u16(16) / 19.53;
-            emit logMessage(QString("ECU 2112: cool=%1 iat=%2 map=%3 tps=%4")
+            ecu.tps = u16(14) / 100.0;              // Java: byte 14, /100
+            ecu.mapActual = u16(18);                 // mbar
+            ecu.railActual = u16(20) / 10.0;         // Java: byte 20, /10 -> bar
+            ecu.aap = u16(30);                       // mbar (barometric)
+            emit logMessage(QString("ECU 2112: cool=%1 iat=%2 tps=%3% map=%4 rail=%5bar aap=%6")
                 .arg(ecu.coolantTemp,0,'f',1).arg(ecu.iat,0,'f',1)
-                .arg(ecu.mapActual).arg(ecu.tps,0,'f',1));
+                .arg(ecu.tps,0,'f',1).arg(ecu.mapActual)
+                .arg(ecu.railActual,0,'f',1).arg(ecu.aap));
         }
         break;
     case 0x20:

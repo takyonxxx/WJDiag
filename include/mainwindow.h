@@ -63,7 +63,7 @@ private:
     QLabel *m_activeHeaderLabel;
     bool m_tcmSessionActive = false;
     bool m_ecuSessionActive = false;
-    QLabel *m_connStatusLabel,*m_elmVersionLabel,*m_batteryVoltLabel;
+    QLabel *m_connStatusLabel,*m_elmVersionLabel;
     QTimer *m_batteryTimer = nullptr;  // ATRV periyodik okuma
     QTableWidget *m_dtcTable; QPushButton *m_readDtcBtn,*m_clearDtcBtn; QLabel *m_dtcCountLabel;
     QPushButton *m_dtcTcmBtn,*m_dtcEcuBtn;
@@ -74,10 +74,6 @@ private:
     QLabel *m_dashSpeedVal,*m_dashSpeedUnit;
     QLabel *m_dashRpmVal,*m_dashRpmUnit;
     QLabel *m_dashCoolantVal,*m_dashCoolantUnit;
-    QLabel *m_dashBoostVal,*m_dashBoostUnit;
-    QLabel *m_dashMafVal,*m_dashMafUnit;
-    QLabel *m_dashMapVal,*m_dashMapUnit;
-    QLabel *m_dashPressVal,*m_dashPressUnit;
     QLabel *m_dashSolVoltVal,*m_dashSolVoltUnit;
     QLabel *m_dashBatVoltVal,*m_dashBatVoltUnit;
     QLabel *m_dashMotCoolVal,*m_dashMotCoolUnit;

@@ -196,23 +196,17 @@ QWidget* MainWindow::createDashboardPanel()
     g->addWidget(createGaugeCard("TURBIN","---","rpm",&m_dashRpmVal,&m_dashRpmUnit), 0,2);
     g->addWidget(createGaugeCard("TRANS","---","C",&m_dashCoolantVal,&m_dashCoolantUnit), 0,3);
 
-    // Row 1: TCC Basinc, Mod PSI, Cikis RPM, Shift PSI
-    g->addWidget(createGaugeCard("TCC","---","PSI",&m_dashBoostVal,&m_dashBoostUnit), 1,0);
-    g->addWidget(createGaugeCard("MOD","---","PSI",&m_dashMafVal,&m_dashMafUnit), 1,1);
-    g->addWidget(createGaugeCard("CIKIS","---","rpm",&m_dashMapVal,&m_dashMapUnit), 1,2);
-    g->addWidget(createGaugeCard("SHIFT","---","PSI",&m_dashPressVal,&m_dashPressUnit), 1,3);
+    // Row 1: Selenoid V, Aku V, Su Sicak (Motor), Limp
+    g->addWidget(createGaugeCard("SOL V","---","V",&m_dashSolVoltVal,&m_dashSolVoltUnit), 1,0);
+    g->addWidget(createGaugeCard("AKU","---","V",&m_dashBatVoltVal,&m_dashBatVoltUnit), 1,1);
+    g->addWidget(createGaugeCard("SU","---","C",&m_dashMotCoolVal,&m_dashMotCoolUnit), 1,2);
+    g->addWidget(createGaugeCard("LIMP","---","",&m_dashLimpVal,&m_dashLimpUnit), 1,3);
 
-    // Row 2: Selenoid V, Aku V, Su Sicak (Motor), Limp
-    g->addWidget(createGaugeCard("SOL V","---","V",&m_dashSolVoltVal,&m_dashSolVoltUnit), 2,0);
-    g->addWidget(createGaugeCard("AKU","---","V",&m_dashBatVoltVal,&m_dashBatVoltUnit), 2,1);
-    g->addWidget(createGaugeCard("SU","---","C",&m_dashMotCoolVal,&m_dashMotCoolUnit), 2,2);
-    g->addWidget(createGaugeCard("LIMP","---","",&m_dashLimpVal,&m_dashLimpUnit), 2,3);
-
-    // Row 3: Motor ECU verileri (DUAL modda guncellenir)
-    g->addWidget(createGaugeCard("M.RPM","---","rpm",&m_dashMotRpmVal,&m_dashMotRpmUnit), 3,0);
-    g->addWidget(createGaugeCard("BOOST","---","mbar",&m_dashMotBoostVal,&m_dashMotBoostUnit), 3,1);
-    g->addWidget(createGaugeCard("MAF","---","mg/s",&m_dashMotMafVal,&m_dashMotMafUnit), 3,2);
-    g->addWidget(createGaugeCard("RAIL","---","bar",&m_dashMotRailVal,&m_dashMotRailUnit), 3,3);
+    // Row 2: Motor ECU verileri (DUAL modda guncellenir)
+    g->addWidget(createGaugeCard("M.RPM","---","rpm",&m_dashMotRpmVal,&m_dashMotRpmUnit), 2,0);
+    g->addWidget(createGaugeCard("BOOST","---","mbar",&m_dashMotBoostVal,&m_dashMotBoostUnit), 2,1);
+    g->addWidget(createGaugeCard("MAF","---","mg/s",&m_dashMotMafVal,&m_dashMotMafUnit), 2,2);
+    g->addWidget(createGaugeCard("RAIL","---","bar",&m_dashMotRailVal,&m_dashMotRailUnit), 2,3);
 
     for(int c=0;c<4;++c) g->setColumnStretch(c,1);
     return p;
@@ -233,15 +227,10 @@ void MainWindow::updateDashboardFromLiveData(const QMap<uint8_t, double> &v)
     }
     if(v.contains(0x20)) m_dashSpeedVal->setText(QString::number(v[0x20],'f',0));       // Vehicle Speed
     if(v.contains(0x10)) m_dashRpmVal->setText(QString::number(v[0x10],'f',0));          // Turbine RPM
-    if(v.contains(0x23)) m_dashPressVal->setText(QString::number(v[0x23],'f',1));        // Shift PSI
     if(v.contains(0x16)){                                                                 // Solenoid Supply
         double sv=v[0x16];
         m_dashSolVoltVal->setText(QString::number(sv,'f',1));
         setGaugeColor(m_dashSolVoltVal, sv<9.0?"#ff4444":sv<11.0?"#ffaa00":"#00ff88");
-    }
-    // Aku voltaji TCM J1850'de yok, solenoid supply'i goster
-    if(!v.contains(0x16) && v.contains(0x16)){
-        m_dashBatVoltVal->setText(QString::number(v[0x16],'f',1));
     }
     // Limp mode: max gear <= 2 ise limp
     if(v.contains(0x03)){
@@ -249,22 +238,12 @@ void MainWindow::updateDashboardFromLiveData(const QMap<uint8_t, double> &v)
         m_dashLimpVal->setText(l?"AKTIF!":"Normal");
         setGaugeColor(m_dashLimpVal, l?"#ff4444":"#00ff88");
     }
-    // Trans temp -> coolant gauge'unda goster
+    // Trans temp
     if(v.contains(0x14)){
         double ct=v[0x14];
         m_dashCoolantVal->setText(QString::number(ct,'f',0));
         setGaugeColor(m_dashCoolantVal, ct>105?"#ff4444":ct>95?"#ffaa00":"#00ff88");
     }
-    // TCC Pressure -> boost gauge'unda goster
-    if(v.contains(0x15)){
-        double tb=v[0x15];
-        m_dashBoostVal->setText(QString::number(tb,'f',2));
-        setGaugeColor(m_dashBoostVal, tb>2.2?"#ff4444":tb>1.8?"#ffaa00":"#00ff88");
-    }
-    // Modulation PSI -> MAF gauge'unda goster
-    if(v.contains(0x24)) m_dashMafVal->setText(QString::number(v[0x24],'f',1));
-    // Output RPM -> MAP gauge'unda goster
-    if(v.contains(0x13)) m_dashMapVal->setText(QString::number(v[0x13],'f',0));
 
     // Motor ECU KWP local ID'ler (dual mode veya ECU canli veri)
     // 0x20 = coolant temp block'undan gelir (KWP ReadDataByLocalID)
@@ -333,10 +312,8 @@ QWidget* MainWindow::createConnectionTab()
     QGridLayout *elmGrid = new QGridLayout(elmBox);
 
     m_elmVersionLabel = new QLabel("Versiyon: ---");
-    m_batteryVoltLabel = new QLabel("Akü Voltajı: ---");
 
     elmGrid->addWidget(m_elmVersionLabel, 0, 0);
-    elmGrid->addWidget(m_batteryVoltLabel, 0, 1);
 
     layout->addWidget(elmBox);
 
@@ -1019,7 +996,6 @@ void MainWindow::onConnectionStateChanged(ELM327Connection::ConnectionState stat
         m_disconnectBtn->setEnabled(true);
         m_startSessionBtn->setEnabled(true);
         m_elmVersionLabel->setText("Versiyon: " + m_elm->elmVersion());
-        m_batteryVoltLabel->setText("Aku: " + m_elm->elmVoltage());
 
         // Aku voltaji periyodik okuma (5 saniyede bir ATRV)
         if (!m_batteryTimer) {
@@ -1032,7 +1008,6 @@ void MainWindow::onConnectionStateChanged(ELM327Connection::ConnectionState stat
                             bool ok;
                             double v = volts.toDouble(&ok);
                             if (ok) {
-                                m_batteryVoltLabel->setText(QString("Aku: %1 V").arg(v, 0, 'f', 1));
                                 m_dashBatVoltVal->setText(QString::number(v, 'f', 1));
                                 setGaugeColor(m_dashBatVoltVal,
                                     v < 11.5 ? "#ff4444" : v < 12.5 ? "#ffaa00" : "#00ff88");
@@ -1265,10 +1240,6 @@ void MainWindow::updateStatusLabels(const TCMDiagnostics::TCMStatus &st)
     m_dashSpeedVal->setText(QString::number(st.vehicleSpeed,'f',0));
     m_dashSolVoltVal->setText(QString::number(st.solenoidSupply,'f',1));
     m_dashCoolantVal->setText(QString::number(st.transTemp,'f',0));      // Trans temp
-    m_dashBoostVal->setText(QString::number(st.tccPressure,'f',1));      // TCC pressure
-    m_dashMafVal->setText(QString::number(st.linePressure,'f',1));       // Modulation PSI
-    m_dashMapVal->setText(QString::number(st.outputRPM,'f',0));          // Output RPM
-    m_dashPressVal->setText(QString::number(st.linePressure,'f',1));     // Shift PSI
     m_dashLimpVal->setText(st.limpMode ? "AKTIF!" : "Normal");
     // Motor su sicakligi: coolantTemp alaninda ECU'dan gelir
     if (st.coolantTemp > 0) {
@@ -1281,8 +1252,6 @@ void MainWindow::updateStatusLabels(const TCMDiagnostics::TCMStatus &st)
         st.solenoidSupply<9.0?"#ff4444":st.solenoidSupply<11.0?"#ffaa00":"#00ff88");
     setGaugeColor(m_dashCoolantVal,
         st.transTemp>105?"#ff4444":st.transTemp>95?"#ffaa00":"#00ff88");
-    setGaugeColor(m_dashBoostVal,
-        st.tccPressure>20?"#ff4444":st.tccPressure>15?"#ffaa00":"#00ff88");
 }
 
 void MainWindow::updateActiveHeaderLabel()
