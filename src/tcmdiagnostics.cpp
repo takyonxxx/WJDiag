@@ -34,7 +34,7 @@ QList<WJDiagnostics::ModuleInfo> WJDiagnostics::allModules()
          BusType::J1850, "ATSH242810", "", "ATSP2"},
         {Module::EVIC, "Overhead Console / Pusula", "EVIC",
          BusType::J1850, "ATSH242A22", "", "ATSP2"},
-        {Module::ABS, "ABS / ESP Frenleme", "ABS",
+        {Module::ABS, "ABS / ESP Braking", "ABS",
          BusType::J1850, "ATSH244022", "", "ATSP2"},
         {Module::Airbag, "Airbag (ORC/AOSIM)", "Airbag",
          BusType::J1850, "ATSH246022", "", "ATSP2"},
@@ -1215,15 +1215,15 @@ void WJDiagnostics::initLiveDataParams()
 QList<WJDiagnostics::IODefinition> WJDiagnostics::ioDefinitions() const
 {
     return {
-        {0x10, "Shift Solenoid 1-2/4-5", "Vites 1-2 / 4-5 selenoid"},
-        {0x11, "Shift Solenoid 2-3",     "Vites 2-3 selenoid"},
-        {0x12, "Shift Solenoid 3-4",     "Vites 3-4 selenoid"},
-        {0x13, "TCC PWM Solenoid",       "Tork konvertor kilitleme"},
-        {0x14, "Modulating Pressure",    "Modulasyon basinci selenoid"},
-        {0x15, "Shift Pressure",         "Vites basinci selenoid"},
-        {0x16, "Park Lockout Solenoid",  "Park kilidi selenoid"},
-        {0x17, "Starter Interlock",      "Mars kilidi"},
-        {0x18, "Reverse Light",          "Geri vites lambasi"},
+        {0x10, "Shift Solenoid 1-2/4-5", "Shift 1-2 / 4-5 solenoid"},
+        {0x11, "Shift Solenoid 2-3",     "Shift 2-3 solenoid"},
+        {0x12, "Shift Solenoid 3-4",     "Shift 3-4 solenoid"},
+        {0x13, "TCC PWM Solenoid",       "TCC lockup"},
+        {0x14, "Modulating Pressure",    "Modulating pressure sol."},
+        {0x15, "Shift Pressure",         "Shift pressure solenoid"},
+        {0x16, "Park Lockout Solenoid",  "Park lockout sol."},
+        {0x17, "Starter Interlock",      "Starter interlock"},
+        {0x18, "Reverse Light",          "Reverse light relay"},
     };
 }
 

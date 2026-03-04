@@ -104,7 +104,7 @@ void MainWindow::setupUI()
     mainLayout->setContentsMargins(3, 2, 3, 2);
     mainLayout->setSpacing(2);
     QFont appFont = QApplication::font();
-    appFont.setPointSize(10);
+    appFont.setPointSize(13);
     QApplication::setFont(appFont);
 #else
     mainLayout->setContentsMargins(6, 6, 6, 6);
@@ -124,11 +124,11 @@ void MainWindow::setupUI()
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     // Mobil: kompakt tab basliklari
     m_tabs->setStyleSheet(
-        "QTabWidget::pane{border:1px solid #2a2a4a;border-top:none;}"
-        "QTabBar::tab{background:#1a1a2e;color:#8888aa;padding:4px 6px;"
-        "border:1px solid #2a2a4a;border-bottom:none;border-radius:3px 3px 0 0;"
-        "font-size:9px;min-width:40px;}"
-        "QTabBar::tab:selected{background:#2a2a4a;color:#00ff88;font-weight:bold;}"
+        "QTabWidget::pane{border:1px solid #1a3050;border-top:none;}"
+        "QTabBar::tab{background:#0e1828;color:#6090a8;padding:10px 14px;"
+        "border:1px solid #1a3050;border-bottom:none;border-radius:4px 4px 0 0;"
+        "font-size:14px;min-width:50px;font-weight:500;}"
+        "QTabBar::tab:selected{background:#122840;color:#00d4b4;font-weight:bold;border-bottom:2px solid #00d4b4;}"
     );
     m_tabs->tabBar()->setExpanding(true);
 #endif
@@ -155,22 +155,22 @@ QFrame* MainWindow::createGaugeCard(const QString &title, const QString &initVal
 {
     QFrame *card = new QFrame();
     card->setFrameShape(QFrame::StyledPanel);
-    card->setStyleSheet("QFrame{background:#1a1a2e;border:1px solid #2a2a4a;border-radius:4px;padding:2px;}");
+    card->setStyleSheet("QFrame{background:#0e1828;border:1px solid #1a3050;border-radius:6px;padding:4px;}");
     card->setMinimumWidth(70);
     card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     QVBoxLayout *lay = new QVBoxLayout(card);
     lay->setContentsMargins(2,1,2,1); lay->setSpacing(0);
     QLabel *tl = new QLabel(title);
-    tl->setStyleSheet("color:#8888aa;font-size:8px;border:none;background:transparent;");
+    tl->setStyleSheet("color:#5888a8;font-size:11px;border:none;background:transparent;");
     tl->setAlignment(Qt::AlignCenter); lay->addWidget(tl);
     QLabel *vl = new QLabel(initValue);
     vl->setAlignment(Qt::AlignCenter);
-    vl->setStyleSheet("color:#00ff88;font-size:16px;font-weight:bold;"
+    vl->setStyleSheet("color:#00d4b4;font-size:20px;font-weight:bold;"
         "font-family:'Consolas','Courier New',monospace;border:none;background:transparent;");
     lay->addWidget(vl);
     QLabel *ul = new QLabel(unit);
     ul->setAlignment(Qt::AlignCenter);
-    ul->setStyleSheet("color:#6666aa;font-size:7px;border:none;background:transparent;");
+    ul->setStyleSheet("color:#406888;font-size:10px;border:none;background:transparent;");
     lay->addWidget(ul);
     *valueLabel = vl; *unitLabel = ul;
     return card;
@@ -183,14 +183,14 @@ QWidget* MainWindow::createDashboardPanel()
     g->setContentsMargins(2,2,2,2); g->setSpacing(3);
 
     // Row 0: Vites, Hiz, Turbin RPM, Trans Sicaklik
-    g->addWidget(createGaugeCard("VITES","---","",&m_dashGearVal,&m_dashGearUnit), 0,0);
-    g->addWidget(createGaugeCard("HIZ","---","km/h",&m_dashSpeedVal,&m_dashSpeedUnit), 0,1);
+    g->addWidget(createGaugeCard("GEAR","---","",&m_dashGearVal,&m_dashGearUnit), 0,0);
+    g->addWidget(createGaugeCard("SPEED","---","km/h",&m_dashSpeedVal,&m_dashSpeedUnit), 0,1);
     g->addWidget(createGaugeCard("TURBIN","---","rpm",&m_dashRpmVal,&m_dashRpmUnit), 0,2);
     g->addWidget(createGaugeCard("TRANS","---","C",&m_dashCoolantVal,&m_dashCoolantUnit), 0,3);
 
     // Row 1: Selenoid V, Aku V, Su Sicak (Motor), Limp
     g->addWidget(createGaugeCard("SOL V","---","V",&m_dashSolVoltVal,&m_dashSolVoltUnit), 1,0);
-    g->addWidget(createGaugeCard("AKU","---","V",&m_dashBatVoltVal,&m_dashBatVoltUnit), 1,1);
+    g->addWidget(createGaugeCard("BATT","---","V",&m_dashBatVoltVal,&m_dashBatVoltUnit), 1,1);
     g->addWidget(createGaugeCard("SU","---","C",&m_dashMotCoolVal,&m_dashMotCoolUnit), 1,2);
     g->addWidget(createGaugeCard("LIMP","---","",&m_dashLimpVal,&m_dashLimpUnit), 1,3);
 
@@ -205,7 +205,7 @@ QWidget* MainWindow::createDashboardPanel()
 }
 
 void MainWindow::setGaugeColor(QLabel *vl, const QString &c) {
-    vl->setStyleSheet(QString("color:%1;font-size:16px;font-weight:bold;"
+    vl->setStyleSheet(QString("color:%1;font-size:20px;font-weight:bold;"
         "font-family:'Consolas','Courier New',monospace;border:none;background:transparent;").arg(c));
 }
 
@@ -215,26 +215,26 @@ void MainWindow::updateDashboardFromLiveData(const QMap<uint8_t, double> &v)
     if(v.contains(0x01)){
         int g=(int)v[0x01];
         m_dashGearVal->setText(gearToString((TCMDiagnostics::Gear)g));
-        setGaugeColor(m_dashGearVal, g>=3 ? "#00ff88" : "#ffcc44");
+        setGaugeColor(m_dashGearVal, g>=3 ? "#00d4b4" : "#d0a040");
     }
     if(v.contains(0x20)) m_dashSpeedVal->setText(QString::number(v[0x20],'f',0));       // Vehicle Speed
     if(v.contains(0x10)) m_dashRpmVal->setText(QString::number(v[0x10],'f',0));          // Turbine RPM
     if(v.contains(0x16)){                                                                 // Solenoid Supply
         double sv=v[0x16];
         m_dashSolVoltVal->setText(QString::number(sv,'f',1));
-        setGaugeColor(m_dashSolVoltVal, sv<9.0?"#ff4444":sv<11.0?"#ffaa00":"#00ff88");
+        setGaugeColor(m_dashSolVoltVal, sv<9.0?"#e04040":sv<11.0?"#d09030":"#00d4b4");
     }
     // Limp mode: max gear <= 2 ise limp
     if(v.contains(0x03)){
         bool l = v[0x03] <= 2 && v.value(0x14, 0) > 100;
         m_dashLimpVal->setText(l?"ACTIVE!":"Normal");
-        setGaugeColor(m_dashLimpVal, l?"#ff4444":"#00ff88");
+        setGaugeColor(m_dashLimpVal, l?"#e04040":"#00d4b4");
     }
     // Trans temp
     if(v.contains(0x14)){
         double ct=v[0x14];
         m_dashCoolantVal->setText(QString::number(ct,'f',0));
-        setGaugeColor(m_dashCoolantVal, ct>105?"#ff4444":ct>95?"#ffaa00":"#00ff88");
+        setGaugeColor(m_dashCoolantVal, ct>105?"#e04040":ct>95?"#d09030":"#00d4b4");
     }
 
     // Motor ECU KWP local ID'ler (dual mode veya ECU canli veri)
@@ -244,7 +244,7 @@ void MainWindow::updateDashboardFromLiveData(const QMap<uint8_t, double> &v)
         double ct = v[0xE0];
         m_dashMotCoolVal->setText(QString::number(ct,'f',0));
         setGaugeColor(m_dashMotCoolVal,
-            ct > 105 ? "#ff4444" : ct > 95 ? "#ffaa00" : "#00ff88");
+            ct > 105 ? "#e04040" : ct > 95 ? "#d09030" : "#00d4b4");
     }
 }
 
@@ -257,18 +257,7 @@ QWidget* MainWindow::createConnectionTab()
 
     QWidget *w = new QWidget();
     QVBoxLayout *layout = new QVBoxLayout(w);
-
-    // Bağlantı ayarları
-    // Uyumluluk bilgisi
-    QLabel *compatInfo = new QLabel(
-        "Jeep Grand Cherokee 2002-2005 WJ/WG 2.7 CRD Only\n"
-        "Engine ECU: K-Line (ATSP5) | TCM/ABS/Airbag/Other: J1850 VPW (ATSP2)\n"
-        "Orijinal ELM327 onerisi: ATFI, ATWM, ATSH destegi gerekli");
-    compatInfo->setStyleSheet("background:#1a2a1a;padding:4px;border-radius:4px;"
-                              "color:#88cc88;font-family:monospace;font-size:9px;");
-    compatInfo->setWordWrap(true);
-    layout->addWidget(compatInfo);
-
+    layout->setSpacing(6);
 
     QGroupBox *connBox = new QGroupBox("ELM327 Connection");
     QGridLayout *connGrid = new QGridLayout(connBox);
@@ -283,103 +272,86 @@ QWidget* MainWindow::createConnectionTab()
     m_portSpin->setMaximumWidth(80);
     connGrid->addWidget(m_portSpin, 0, 2);
     m_connectBtn = new QPushButton("WiFi Connect");
-    m_connectBtn->setMinimumHeight(34);
+    m_connectBtn->setMinimumHeight(36);
     connGrid->addWidget(m_connectBtn, 0, 3);
 
     // Bluetooth row
     connGrid->addWidget(new QLabel("BT:"), 1, 0);
     m_btCombo = new QComboBox();
     m_btCombo->setPlaceholderText("Select Bluetooth device...");
-    m_btCombo->setStyleSheet("QComboBox{background:#1a1a2e;color:#88ccff;border:1px solid #3a3a6a;"
-                             "border-radius:3px;padding:2px 4px;}");
+    m_btCombo->setStyleSheet("QComboBox{background:#0e1828;color:#60b8d0;border:1px solid #1a4060;"
+                             "border-radius:4px;padding:6px 8px;font-size:13px;}");
     connGrid->addWidget(m_btCombo, 1, 1, 1, 2);
     m_btScanBtn = new QPushButton("Scan");
-    m_btScanBtn->setMinimumHeight(34);
-    m_btScanBtn->setStyleSheet("QPushButton{background:#1a2a4a;color:#88ccff;border:1px solid #3a5a8a;"
-                               "border-radius:3px;font-weight:bold;}");
+    m_btScanBtn->setMinimumHeight(36);
+    // uses global button style
     connGrid->addWidget(m_btScanBtn, 1, 3);
 
-    // BT Baglan + Disconnect
+    // BT Connect + Disconnect
     m_btConnectBtn = new QPushButton("BT Connect");
-    m_btConnectBtn->setMinimumHeight(34);
-    m_btConnectBtn->setStyleSheet("QPushButton{background:#1a3a5a;color:#88ccff;border:1px solid #3a6a9a;"
-                                  "border-radius:3px;font-weight:bold;}");
+    m_btConnectBtn->setMinimumHeight(36);
+    // uses global button style
     m_btConnectBtn->setEnabled(false);
     connGrid->addWidget(m_btConnectBtn, 2, 0, 1, 2);
 
     m_disconnectBtn = new QPushButton("Disconnect");
-    m_disconnectBtn->setMinimumHeight(34);
+    m_disconnectBtn->setMinimumHeight(36);
     m_disconnectBtn->setEnabled(false);
     connGrid->addWidget(m_disconnectBtn, 2, 2, 1, 2);
 
-    // Durum
+    // Status
     m_connStatusLabel = new QLabel("Status: Disconnected");
-    m_connStatusLabel->setStyleSheet("color: red; font-weight: bold;");
+    m_connStatusLabel->setStyleSheet("color: #e04040; font-weight: bold; font-size: 14px;");
     connGrid->addWidget(m_connStatusLabel, 3, 0, 1, 4);
 
     layout->addWidget(connBox);
 
-    // ELM327 Bilgileri
-    QGroupBox *elmBox = new QGroupBox("ELM327 Bilgileri");
-    QGridLayout *elmGrid = new QGridLayout(elmBox);
-
-    m_elmVersionLabel = new QLabel("Version: ---");
-
-    elmGrid->addWidget(m_elmVersionLabel, 0, 0);
-
-    layout->addWidget(elmBox);
-
-    // TCM Oturum
-    // === TCM Diagnostik Oturum ===
-    QGroupBox *tcmBox = new QGroupBox("TCM - NAG1 722.6 Transmission");
-    tcmBox->setStyleSheet("QGroupBox{font-weight:bold;color:#88ccff;}");
+    // TCM Session
+    QGroupBox *tcmBox = new QGroupBox("TCM - NAG1 722.6");
+    tcmBox->setStyleSheet("QGroupBox{font-weight:bold;color:#40b8d0;font-size:14px;}");
     QVBoxLayout *tcmLayout = new QVBoxLayout(tcmBox);
+    tcmLayout->setSpacing(4);
 
     m_startSessionBtn = new QPushButton("Start TCM Session");
     m_startSessionBtn->setEnabled(false);
-    m_startSessionBtn->setMinimumHeight(34);
+    m_startSessionBtn->setMinimumHeight(36);
+    m_startSessionBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_startSessionBtn->setStyleSheet(
-        "QPushButton{background:#1a3a5a;color:white;border:1px solid #3a6a9a;border-radius:4px;}"
-        "QPushButton:hover{background:#2a4a6a;}");
+        "QPushButton{background:#0e2040;color:#80b0d0;border:1px solid #1a4868;border-radius:5px;font-size:13px;}"
+        "QPushButton:hover{background:#143058;}");
     tcmLayout->addWidget(m_startSessionBtn);
 
-    QLabel *tcmProto = new QLabel(
-        "Protocol: J1850 VPW (ATSP2)\n"
-        "Address: 0x28 (TCM - NAG1 722.6)\n"
-        "Header: ATSH2428xx  |  SID 0x22 ReadDataByPID");
-    tcmProto->setStyleSheet("background:#1a2a3a;padding:4px;border-radius:4px;"
-                            "color:#88ff88;font-family:monospace;font-size:9px;");
+    QLabel *tcmProto = new QLabel("J1850 VPW | 0x28 | ATSH2428xx | SID 0x22");
+    tcmProto->setStyleSheet("color:#406880;font-family:monospace;font-size:11px;");
     tcmLayout->addWidget(tcmProto);
 
     layout->addWidget(tcmBox);
 
-    // === ECU Diagnostik Oturum ===
-    QGroupBox *ecuBox = new QGroupBox("ECU - Engine (OM612 2.7 CRD)");
-    ecuBox->setStyleSheet("QGroupBox{font-weight:bold;color:#ffcc44;}");
+    // ECU Session
+    QGroupBox *ecuBox = new QGroupBox("ECU - OM612 EDC15C2");
+    ecuBox->setStyleSheet("QGroupBox{font-weight:bold;color:#d0a040;font-size:14px;}");
     QVBoxLayout *ecuLayout = new QVBoxLayout(ecuBox);
+    ecuLayout->setSpacing(4);
 
     m_startEcuBtn = new QPushButton("Start ECU Session");
     m_startEcuBtn->setEnabled(false);
-    m_startEcuBtn->setMinimumHeight(34);
+    m_startEcuBtn->setMinimumHeight(36);
+    m_startEcuBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_startEcuBtn->setStyleSheet(
-        "QPushButton{background:#3a3a1a;color:white;border:1px solid #6a6a3a;border-radius:4px;}"
-        "QPushButton:hover{background:#4a4a2a;}");
+        "QPushButton{background:#1a1a0e;color:#c0a870;border:1px solid #3a3a20;border-radius:5px;font-size:13px;}"
+        "QPushButton:hover{background:#2a2a18;}");
     ecuLayout->addWidget(m_startEcuBtn);
 
-    QLabel *ecuProto = new QLabel(
-        "Protocol: K-Line ISO 14230-4 (ATSP5)\n"
-        "Address: 0x15 (Engine ECU - Bosch EDC15C2)\n"
-        "Header: ATSH8115F1  |  ATWM8115F13E");
-    ecuProto->setStyleSheet("background:#2a2a1a;padding:4px;border-radius:4px;"
-                            "color:#ffdd88;font-family:monospace;font-size:9px;");
+    QLabel *ecuProto = new QLabel("K-Line ISO14230 | 0x15 | ATSH8115F1 | ATWM8115F13E");
+    ecuProto->setStyleSheet("color:#605838;font-family:monospace;font-size:11px;");
     ecuLayout->addWidget(ecuProto);
 
     layout->addWidget(ecuBox);
 
-    // === Aktif Header Gostergesi ===
-    m_activeHeaderLabel = new QLabel("Active Header: ---  (Waiting for connection)");
-    m_activeHeaderLabel->setStyleSheet("background:#2a2a3a;padding:4px;border-radius:4px;"
-                                       "color:#aaaaaa;font-family:monospace;font-weight:bold;");
+    // Active Header
+    m_activeHeaderLabel = new QLabel("---");
+    m_activeHeaderLabel->setStyleSheet("background:#0e1828;padding:4px;border-radius:4px;"
+                                       "color:#80a8c0;font-family:monospace;font-weight:bold;font-size:10px;");
     m_activeHeaderLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(m_activeHeaderLabel);
 
@@ -423,8 +395,8 @@ QWidget* MainWindow::createConnectionTab()
             m_tcmSessionActive = false;
             m_startSessionBtn->setText("Start TCM Session");
             m_startSessionBtn->setStyleSheet(
-                "QPushButton{background:#1a3a5a;color:white;border:1px solid #3a6a9a;border-radius:4px;}"
-                "QPushButton:hover{background:#2a4a6a;}");
+                "QPushButton{background:#0e2040;color:#80b0d0;border:1px solid #1a4868;border-radius:5px;font-size:13px;}"
+                "QPushButton:hover{background:#143058;}");
             statusBar()->showMessage("TCM session closed");
             updateActiveHeaderLabel();
             return;
@@ -437,8 +409,8 @@ QWidget* MainWindow::createConnectionTab()
                 m_tcmSessionActive = true;
                 m_startSessionBtn->setText("TCM Active");
                 m_startSessionBtn->setStyleSheet(
-                    "QPushButton{background:#2a5a2a;color:#88ff88;border:1px solid #4a8a4a;border-radius:4px;font-weight:bold;}"
-                    "QPushButton:hover{background:#3a6a3a;}");
+                    "QPushButton{background:#0a3830;color:#00d4b4;border:1px solid #00806a;border-radius:5px;font-weight:bold;font-size:13px;}"
+                    "QPushButton:hover{background:#104840;}");
                 m_startSessionBtn->setEnabled(true);
                 m_startEcuBtn->setEnabled(true);
                 m_readDtcBtn->setEnabled(true);
@@ -460,8 +432,8 @@ QWidget* MainWindow::createConnectionTab()
             m_ecuSessionActive = false;
             m_startEcuBtn->setText("Start ECU Session");
             m_startEcuBtn->setStyleSheet(
-                "QPushButton{background:#3a3a1a;color:white;border:1px solid #6a6a3a;border-radius:4px;}"
-                "QPushButton:hover{background:#4a4a2a;}");
+                "QPushButton{background:#1a1a0e;color:#c0a870;border:1px solid #3a3a20;border-radius:5px;font-size:13px;}"
+                "QPushButton:hover{background:#2a2a18;}");
             statusBar()->showMessage("ECU session closed");
             updateActiveHeaderLabel();
             return;
@@ -474,8 +446,8 @@ QWidget* MainWindow::createConnectionTab()
                 m_ecuSessionActive = true;
                 m_startEcuBtn->setText("ECU Active");
                 m_startEcuBtn->setStyleSheet(
-                    "QPushButton{background:#2a5a2a;color:#88ff88;border:1px solid #4a8a4a;border-radius:4px;font-weight:bold;}"
-                    "QPushButton:hover{background:#3a6a3a;}");
+                    "QPushButton{background:#0a3830;color:#00d4b4;border:1px solid #00806a;border-radius:5px;font-weight:bold;font-size:13px;}"
+                    "QPushButton:hover{background:#104840;}");
                 statusBar()->showMessage("ECU session active - K-Line ready");
             } else {
                 statusBar()->showMessage("ECU session failed - K-Line init error");
@@ -500,37 +472,37 @@ QWidget* MainWindow::createDTCTab()
     srcLabel->setStyleSheet("font-weight:bold;");
     sourceLayout->addWidget(srcLabel);
 
-    m_dtcTcmBtn = new QPushButton("TCM (Trans)");
+    m_dtcTcmBtn = new QPushButton("TCM");
     m_dtcTcmBtn->setCheckable(true);
     m_dtcTcmBtn->setChecked(true);
-    m_dtcTcmBtn->setMinimumHeight(34);
+    m_dtcTcmBtn->setMinimumHeight(36);
     m_dtcTcmBtn->setStyleSheet(
-        "QPushButton{background:#1a3a5a;color:white;border:1px solid #3a6a9a;border-radius:4px;padding:4px 12px;}"
-        "QPushButton:checked{background:#2a5a2a;color:#88ff88;border:1px solid #4a8a4a;font-weight:bold;}");
+        "QPushButton{background:#1a3a5a;color:white;border:1px solid #3a6a9a;border-radius:4px;padding:8px 14px;}"
+        "QPushButton:checked{background:#0a3830;color:#00d4b4;border:1px solid #00806a;font-weight:bold;}");
 
-    m_dtcEcuBtn = new QPushButton("ECU (Engine)");
+    m_dtcEcuBtn = new QPushButton("ECU");
     m_dtcEcuBtn->setCheckable(true);
     m_dtcEcuBtn->setChecked(false);
-    m_dtcEcuBtn->setMinimumHeight(34);
+    m_dtcEcuBtn->setMinimumHeight(36);
     m_dtcEcuBtn->setStyleSheet(
-        "QPushButton{background:#3a3a1a;color:white;border:1px solid #6a6a3a;border-radius:4px;padding:4px 12px;}"
-        "QPushButton:checked{background:#2a5a2a;color:#88ff88;border:1px solid #4a8a4a;font-weight:bold;}");
+        "QPushButton{background:#3a3a1a;color:white;border:1px solid #6a6a3a;border-radius:4px;padding:8px 14px;}"
+        "QPushButton:checked{background:#0a3830;color:#00d4b4;border:1px solid #00806a;font-weight:bold;}");
 
     m_dtcAbsBtn = new QPushButton("ABS");
     m_dtcAbsBtn->setCheckable(true);
     m_dtcAbsBtn->setChecked(false);
-    m_dtcAbsBtn->setMinimumHeight(34);
+    m_dtcAbsBtn->setMinimumHeight(36);
     m_dtcAbsBtn->setStyleSheet(
-        "QPushButton{background:#1a2a3a;color:white;border:1px solid #3a5a7a;border-radius:4px;padding:4px 12px;}"
-        "QPushButton:checked{background:#2a5a2a;color:#88ff88;border:1px solid #4a8a4a;font-weight:bold;}");
+        "QPushButton{background:#1a2a3a;color:white;border:1px solid #3a5a7a;border-radius:4px;padding:8px 14px;}"
+        "QPushButton:checked{background:#0a3830;color:#00d4b4;border:1px solid #00806a;font-weight:bold;}");
 
     m_dtcAirbagBtn = new QPushButton("Airbag");
     m_dtcAirbagBtn->setCheckable(true);
     m_dtcAirbagBtn->setChecked(false);
-    m_dtcAirbagBtn->setMinimumHeight(34);
+    m_dtcAirbagBtn->setMinimumHeight(36);
     m_dtcAirbagBtn->setStyleSheet(
-        "QPushButton{background:#3a2a1a;color:white;border:1px solid #6a4a2a;border-radius:4px;padding:4px 12px;}"
-        "QPushButton:checked{background:#2a5a2a;color:#88ff88;border:1px solid #4a8a4a;font-weight:bold;}");
+        "QPushButton{background:#3a2a1a;color:white;border:1px solid #6a4a2a;border-radius:4px;padding:8px 14px;}"
+        "QPushButton:checked{background:#0a3830;color:#00d4b4;border:1px solid #00806a;font-weight:bold;}");
 
     sourceLayout->addWidget(m_dtcTcmBtn);
     sourceLayout->addWidget(m_dtcEcuBtn);
@@ -558,12 +530,12 @@ QWidget* MainWindow::createDTCTab()
     // === Butonlar ===
     QHBoxLayout *btnLayout = new QHBoxLayout();
 
-    m_readDtcBtn  = new QPushButton("Read Fault Codes");
-    m_clearDtcBtn = new QPushButton("Clear Fault Codes");
+    m_readDtcBtn  = new QPushButton("Read DTC");
+    m_clearDtcBtn = new QPushButton("Clear DTC");
     m_dtcCountLabel = new QLabel("Source: TCM - 0 fault codes");
 
-    m_readDtcBtn->setMinimumHeight(34);
-    m_clearDtcBtn->setMinimumHeight(34);
+    m_readDtcBtn->setMinimumHeight(36);
+    m_clearDtcBtn->setMinimumHeight(36);
     m_readDtcBtn->setEnabled(false);
     m_clearDtcBtn->setEnabled(false);
 
@@ -575,26 +547,16 @@ QWidget* MainWindow::createDTCTab()
     layout->addLayout(btnLayout);
 
     // DTC tablosu - 6 sutun (kaynak eklendi)
-    m_dtcTable = new QTableWidget(0, 5);
-    m_dtcTable->setHorizontalHeaderLabels({
-        "Source", "Code", "Description", "State", "Status"
-    });
+    m_dtcTable = new QTableWidget(0, 3);
+    m_dtcTable->setHorizontalHeaderLabels({"Code", "Description", "State"});
     m_dtcTable->horizontalHeader()->setStretchLastSection(true);
-    m_dtcTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    m_dtcTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_dtcTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_dtcTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_dtcTable->setAlternatingRowColors(true);
     QScroller::grabGesture(m_dtcTable->viewport(), QScroller::LeftMouseButtonGesture);
 
     layout->addWidget(m_dtcTable);
-
-    // P2602 notu
-    QLabel *p2602Note = new QLabel(
-        "NOTE: P2602 (Solenoid Voltage) is usually caused by weak battery or "
-        "transmission 13-pin connector contact issue.");
-    p2602Note->setWordWrap(true);
-    p2602Note->setStyleSheet("background:#3a3a20;padding:4px;border-radius:4px;color:#ffcc44;");
-    layout->addWidget(p2602Note);
 
     connect(m_readDtcBtn, &QPushButton::clicked, this, &MainWindow::onReadDTCs);
     connect(m_clearDtcBtn, &QPushButton::clicked, this, &MainWindow::onClearDTCs);
@@ -613,9 +575,9 @@ QWidget* MainWindow::createLiveDataTab()
     m_stopLiveBtn  = new QPushButton("Stop");
     m_logBtn       = new QPushButton("Copy CSV");
 
-    m_startLiveBtn->setMinimumHeight(34);
-    m_stopLiveBtn->setMinimumHeight(34);
-    m_logBtn->setMinimumHeight(34);
+    m_startLiveBtn->setMinimumHeight(36);
+    m_stopLiveBtn->setMinimumHeight(36);
+    m_logBtn->setMinimumHeight(36);
     m_startLiveBtn->setEnabled(false);
     m_stopLiveBtn->setEnabled(false);
 
@@ -625,9 +587,9 @@ QWidget* MainWindow::createLiveDataTab()
     m_modeCombo->addItem("ECU", (int)LiveDataManager::ECU_ONLY);
     m_modeCombo->addItem("TCM+ECU", (int)LiveDataManager::DUAL);
     m_modeCombo->setCurrentIndex(2); // default DUAL
-    m_modeCombo->setMinimumHeight(34);
-    m_modeCombo->setStyleSheet("QComboBox{background:#1a2a3a;color:#88ff88;border:1px solid #3a6a9a;"
-                               "border-radius:3px;padding:2px 6px;font-weight:bold;}");
+    m_modeCombo->setMinimumHeight(36);
+    m_modeCombo->setStyleSheet("QComboBox{background:#0e1828;color:#00d4b4;border:1px solid #1a4868;"
+                               "border-radius:4px;padding:6px 10px;font-weight:bold;font-size:13px;}");
     connect(m_modeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
         m_liveData->setMode(static_cast<LiveDataManager::Mode>(m_modeCombo->itemData(idx).toInt()));
     });
@@ -641,9 +603,9 @@ QWidget* MainWindow::createLiveDataTab()
     layout->addLayout(btnLayout);
 
     // Live data tablosu
-    m_liveTable = new QTableWidget(0, 5);
+    m_liveTable = new QTableWidget(0, 3);
     m_liveTable->setHorizontalHeaderLabels({
-        "Select", "Parametre", "Value", "Birim", "Local ID"
+        "Sel", "Parameter", "Value"
     });
     m_liveTable->horizontalHeader()->setStretchLastSection(false);
     m_liveTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
@@ -662,7 +624,7 @@ QWidget* MainWindow::createLiveDataTab()
         checkItem->setCheckState(Qt::Checked);
         m_liveTable->setItem(i, 0, checkItem);
 
-        // İsim
+        // Name
         m_liveTable->setItem(i, 1, new QTableWidgetItem(p.name));
 
         // Value
@@ -673,22 +635,6 @@ QWidget* MainWindow::createLiveDataTab()
         valFont.setPointSize(11);
         valItem->setFont(valFont);
         m_liveTable->setItem(i, 2, valItem);
-
-        // Birim
-        m_liveTable->setItem(i, 3, new QTableWidgetItem(p.unit));
-
-        // Local ID
-        m_liveTable->setItem(i, 4, new QTableWidgetItem(
-            QString("0x%1").arg(p.localID, 2, 16, QChar('0')).toUpper()));
-
-        // P2602 ile ilgili satırı vurgula
-        if (p.localID == 0x09) { // Selenoid Besleme Voltajı
-            for (int col = 0; col < 5; ++col) {
-                if (m_liveTable->item(i, col)) {
-                    m_liveTable->item(i, col)->setBackground(QColor(60, 60, 20));
-                }
-            }
-        }
     }
 
     layout->addWidget(m_liveTable);
@@ -731,14 +677,12 @@ QWidget* MainWindow::createIOTab()
     QVBoxLayout *layout = new QVBoxLayout(w);
 
     m_readIOBtn = new QPushButton("Read I/O States");
-    m_readIOBtn->setMinimumHeight(34);
+    m_readIOBtn->setMinimumHeight(36);
     m_readIOBtn->setEnabled(false);
     layout->addWidget(m_readIOBtn);
 
-    m_ioTable = new QTableWidget(0, 4);
-    m_ioTable->setHorizontalHeaderLabels({
-        "I/O", "Description", "State", "Detay"
-    });
+    m_ioTable = new QTableWidget(0, 2);
+    m_ioTable->setHorizontalHeaderLabels({"Output", "State"});
     m_ioTable->horizontalHeader()->setStretchLastSection(true);
     m_ioTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_ioTable->setAlternatingRowColors(true);
@@ -751,11 +695,8 @@ QWidget* MainWindow::createIOTab()
 
     for (int i = 0; i < ioDefs.size(); ++i) {
         const auto &io = ioDefs[i];
-        m_ioTable->setItem(i, 0, new QTableWidgetItem(io.name));
-        m_ioTable->setItem(i, 1, new QTableWidgetItem(io.description));
-        m_ioTable->setItem(i, 2, new QTableWidgetItem("---"));
-        m_ioTable->setItem(i, 3, new QTableWidgetItem(
-            QString("ID: 0x%1").arg(io.localID, 2, 16, QChar('0'))));
+        m_ioTable->setItem(i, 0, new QTableWidgetItem(io.description));
+        m_ioTable->setItem(i, 1, new QTableWidgetItem("---"));
     }
 
     layout->addWidget(m_ioTable);
@@ -765,7 +706,7 @@ QWidget* MainWindow::createIOTab()
         "Incorrect solenoid activation may damage the transmission."
     );
     ioWarning->setWordWrap(true);
-    ioWarning->setStyleSheet("background: #4a2020; padding: 8px; border-radius: 4px; "
+    ioWarning->setStyleSheet("background: #2a1018; padding: 10px; border-radius: 5px; "
                              "color: #ff6666; font-weight: bold;");
     layout->addWidget(ioWarning);
 
@@ -782,7 +723,7 @@ QWidget* MainWindow::createLogTab()
     m_logText = new QTextEdit();
     m_logText->setReadOnly(true);
     m_logText->setFont(QFont("Consolas", 9));
-    m_logText->setStyleSheet("background: #1a1a2e; color: #00ff00;");
+    m_logText->setStyleSheet("background: #0a1220; color: #60b8a0; font-size: 12px;");
 
     layout->addWidget(m_logText);
 
@@ -792,12 +733,12 @@ QWidget* MainWindow::createLogTab()
 
     // Row 0: Clear | Copy Log | Raw Data Read
     QPushButton *clearLogBtn = new QPushButton("Clear");
-    clearLogBtn->setStyleSheet("padding:4px 6px;");
+    clearLogBtn->setStyleSheet("padding:8px 12px;");
     connect(clearLogBtn, &QPushButton::clicked, m_logText, &QTextEdit::clear);
     logGrid->addWidget(clearLogBtn, 0, 0);
 
     QPushButton *saveLogBtn = new QPushButton("Copy Log");
-    saveLogBtn->setStyleSheet("background:#2a3a2a; color:#88ff88; font-weight:bold; padding:4px 6px;");
+    saveLogBtn->setStyleSheet("background:#0a2820; color:#00d4b4; font-weight:bold; padding:8px 12px; font-size:13px;");
     connect(saveLogBtn, &QPushButton::clicked, this, [this]() {
         QString text = m_logText->toPlainText();
         if (text.isEmpty()) {
@@ -818,7 +759,7 @@ QWidget* MainWindow::createLogTab()
     // Satir 1: Komut input + Gonder
     m_rawCmdEdit = new QLineEdit();
     m_rawCmdEdit->setPlaceholderText("21 01 veya ATRV");
-    m_rawCmdEdit->setStyleSheet("background:#1a1a2e; color:#00ff00; border:1px solid #444; padding:3px;");
+    m_rawCmdEdit->setStyleSheet("background:#0e1828; color:#60b8a0; border:1px solid #1a3050; padding:6px; font-size:13px;");
     logGrid->addWidget(m_rawCmdEdit, 1, 0, 1, 2);
 
     m_rawSendBtn = new QPushButton("Send");
@@ -852,7 +793,7 @@ void MainWindow::onConnectionStateChanged(ELM327Connection::ConnectionState stat
     switch (state) {
     case ELM327Connection::ConnectionState::Disconnected:
         m_connStatusLabel->setText("Status: Disconnected");
-        m_connStatusLabel->setStyleSheet("color: red; font-weight: bold;");
+        m_connStatusLabel->setStyleSheet("color: #e04040; font-weight: bold; font-size: 14px;");
         m_connectBtn->setEnabled(true);
         m_disconnectBtn->setEnabled(false);
         m_startSessionBtn->setEnabled(false);
@@ -882,14 +823,14 @@ void MainWindow::onConnectionStateChanged(ELM327Connection::ConnectionState stat
         m_connectBtn->setEnabled(false);
         m_disconnectBtn->setEnabled(true);
         m_startSessionBtn->setEnabled(true);
-        m_elmVersionLabel->setText("Version: " + m_elm->elmVersion());
+        // ELM327 version shown in log
 
         statusBar()->showMessage("ELM327 ready - Start a diagnostic session");
         break;
 
     case ELM327Connection::ConnectionState::Error:
         m_connStatusLabel->setText("Status: ERROR!");
-        m_connStatusLabel->setStyleSheet("color: red; font-weight: bold;");
+        m_connStatusLabel->setStyleSheet("color: #e04040; font-weight: bold; font-size: 14px;");
         m_connectBtn->setEnabled(true);
         m_disconnectBtn->setEnabled(true);
         statusBar()->showMessage("Connection error!");
@@ -920,15 +861,12 @@ void MainWindow::onReadDTCs()
         for (const auto &d : dtcs) {
             int row = m_dtcTable->rowCount();
             m_dtcTable->insertRow(row);
-            m_dtcTable->setItem(row, 0, new QTableWidgetItem(src));
-            m_dtcTable->setItem(row, 1, new QTableWidgetItem(d.code));
-            m_dtcTable->setItem(row, 2, new QTableWidgetItem(d.description));
-            m_dtcTable->setItem(row, 3, new QTableWidgetItem(d.isActive ? "Active" : "Stored"));
-            m_dtcTable->setItem(row, 4, new QTableWidgetItem(
-                QString("0x%1").arg(d.status, 2, 16, QChar('0')).toUpper()));
+            m_dtcTable->setItem(row, 0, new QTableWidgetItem(d.code));
+            m_dtcTable->setItem(row, 1, new QTableWidgetItem(d.description));
+            m_dtcTable->setItem(row, 2, new QTableWidgetItem(d.isActive ? "Active" : "Stored"));
 
             if (d.isActive) {
-                for (int col = 0; col < 5; ++col) {
+                for (int col = 0; col < 3; ++col) {
                     m_dtcTable->item(row, col)->setBackground(QColor(80, 20, 20));
                     m_dtcTable->item(row, col)->setForeground(QColor(255, 100, 100));
                 }
@@ -952,7 +890,7 @@ void MainWindow::onClearDTCs()
                   "NOTE: Active faults will reappear if the problem persists.").arg(src);
 
     QMessageBox::StandardButton reply = QMessageBox::question(
-        this, "Clear Fault Codes", warning,
+        this, "Clear DTC", warning,
         QMessageBox::Yes | QMessageBox::No);
 
     if (reply == QMessageBox::Yes) {
@@ -993,7 +931,7 @@ void MainWindow::onStartLiveData()
     }
 
     if (selected.isEmpty()) {
-        QMessageBox::warning(this, "Parametre Selectimi",
+        QMessageBox::warning(this, "Parameter Selection",
                              "You must select at least one parameter!");
         return;
     }
@@ -1062,7 +1000,7 @@ void MainWindow::onFullStatusUpdated(const TCMDiagnostics::TCMStatus &status)
     if (status.batteryVoltage > 0) {
         m_dashBatVoltVal->setText(QString::number(status.batteryVoltage, 'f', 1));
         setGaugeColor(m_dashBatVoltVal,
-            status.batteryVoltage < 11.5 ? "#ff4444" : status.batteryVoltage < 12.5 ? "#ffaa00" : "#00ff88");
+            status.batteryVoltage < 11.5 ? "#e04040" : status.batteryVoltage < 12.5 ? "#d09030" : "#00d4b4");
     }
 }
 
@@ -1071,12 +1009,12 @@ void MainWindow::onECUDataUpdated(const TCMDiagnostics::ECUStatus &ecu)
     // Motor RPM
     m_dashMotRpmVal->setText(QString::number(ecu.rpm, 'f', 0));
     setGaugeColor(m_dashMotRpmVal,
-        ecu.rpm > 4500 ? "#ff4444" : ecu.rpm > 3500 ? "#ffaa00" : "#00ff88");
+        ecu.rpm > 4500 ? "#e04040" : ecu.rpm > 3500 ? "#d09030" : "#00d4b4");
 
     // Boost Pressure (mbar)
     m_dashMotBoostVal->setText(QString::number(ecu.boostPressure, 'f', 0));
     setGaugeColor(m_dashMotBoostVal,
-        ecu.boostPressure > 2000 ? "#ff4444" : ecu.boostPressure > 1500 ? "#ffaa00" : "#00ff88");
+        ecu.boostPressure > 2000 ? "#e04040" : ecu.boostPressure > 1500 ? "#d09030" : "#00d4b4");
 
     // MAF
     m_dashMotMafVal->setText(QString::number(ecu.mafActual, 'f', 0));
@@ -1084,18 +1022,18 @@ void MainWindow::onECUDataUpdated(const TCMDiagnostics::ECUStatus &ecu)
     // Rail Pressure (bar)
     m_dashMotRailVal->setText(QString::number(ecu.railActual, 'f', 0));
     setGaugeColor(m_dashMotRailVal,
-        ecu.railActual > 1400 ? "#ff4444" : ecu.railActual > 1200 ? "#ffaa00" : "#00ff88");
+        ecu.railActual > 1400 ? "#e04040" : ecu.railActual > 1200 ? "#d09030" : "#00d4b4");
 
     // Su sicakligi (Motor ECU'dan gelen coolant)
     m_dashMotCoolVal->setText(QString::number(ecu.coolantTemp, 'f', 0));
     setGaugeColor(m_dashMotCoolVal,
-        ecu.coolantTemp > 105 ? "#ff4444" : ecu.coolantTemp > 95 ? "#ffaa00" : "#00ff88");
+        ecu.coolantTemp > 105 ? "#e04040" : ecu.coolantTemp > 95 ? "#d09030" : "#00d4b4");
 
     // Battery voltage (ECU'dan)
     if (ecu.batteryVoltage > 0) {
         m_dashBatVoltVal->setText(QString::number(ecu.batteryVoltage, 'f', 1));
         setGaugeColor(m_dashBatVoltVal,
-            ecu.batteryVoltage < 11.5 ? "#ff4444" : ecu.batteryVoltage < 12.5 ? "#ffaa00" : "#00ff88");
+            ecu.batteryVoltage < 11.5 ? "#e04040" : ecu.batteryVoltage < 12.5 ? "#d09030" : "#00d4b4");
     }
 }
 
@@ -1107,12 +1045,12 @@ void MainWindow::onReadIO()
     m_tcm->readIOStates([this](const QList<TCMDiagnostics::IOState> &states) {
         for (int i = 0; i < states.size() && i < m_ioTable->rowCount(); ++i) {
             QString statusStr = states[i].isActive ? "ACTIVE" : "Off";
-            m_ioTable->item(i, 2)->setText(statusStr);
+            m_ioTable->item(i, 1)->setText(statusStr);
 
             if (states[i].isActive) {
-                m_ioTable->item(i, 2)->setBackground(QColor(20, 80, 20));
+                m_ioTable->item(i, 1)->setBackground(QColor(20, 80, 20));
             } else {
-                m_ioTable->item(i, 2)->setBackground(QColor(40, 40, 40));
+                m_ioTable->item(i, 1)->setBackground(QColor(40, 40, 40));
             }
         }
 
@@ -1139,13 +1077,13 @@ void MainWindow::updateStatusLabels(const TCMDiagnostics::TCMStatus &st)
     if (st.coolantTemp > 0) {
         m_dashMotCoolVal->setText(QString::number(st.coolantTemp,'f',0));
         setGaugeColor(m_dashMotCoolVal,
-            st.coolantTemp>105?"#ff4444":st.coolantTemp>95?"#ffaa00":"#00ff88");
+            st.coolantTemp>105?"#e04040":st.coolantTemp>95?"#d09030":"#00d4b4");
     }
-    setGaugeColor(m_dashLimpVal, st.limpMode ? "#ff4444" : "#00ff88");
+    setGaugeColor(m_dashLimpVal, st.limpMode ? "#e04040" : "#00d4b4");
     setGaugeColor(m_dashSolVoltVal,
-        st.solenoidSupply<9.0?"#ff4444":st.solenoidSupply<11.0?"#ffaa00":"#00ff88");
+        st.solenoidSupply<9.0?"#e04040":st.solenoidSupply<11.0?"#d09030":"#00d4b4");
     setGaugeColor(m_dashCoolantVal,
-        st.transTemp>105?"#ff4444":st.transTemp>95?"#ffaa00":"#00ff88");
+        st.transTemp>105?"#e04040":st.transTemp>95?"#d09030":"#00d4b4");
 }
 
 void MainWindow::updateActiveHeaderLabel()
@@ -1153,19 +1091,19 @@ void MainWindow::updateActiveHeaderLabel()
     QString text;
     QString style;
     if (m_tcmSessionActive && m_ecuSessionActive) {
-        text = "Active: TCM (J1850) + ECU (K-Line)  |  Dual Mode";
+        text = "Active: TCM+ECU | Dual Mode";
         style = "background:#2a3a2a;padding:4px;border-radius:4px;"
                 "color:#88ffaa;font-family:monospace;font-weight:bold;";
     } else if (m_tcmSessionActive) {
-        text = "Active: TCM  |  J1850 VPW  |  ATSH2428xx  |  NAG1 722.6";
+        text = "Active: TCM | J1850 VPW | ATSH2428xx";
         style = "background:#1a3a5a;padding:4px;border-radius:4px;"
                 "color:#88ccff;font-family:monospace;font-weight:bold;";
     } else if (m_ecuSessionActive) {
-        text = "Active: ECU  |  ATSH 81 15 F1  |  Engine OM612 (EDC15C2)";
+        text = "Active: ECU | K-Line | ATSH8115F1";
         style = "background:#3a3a1a;padding:4px;border-radius:4px;"
                 "color:#ffcc44;font-family:monospace;font-weight:bold;";
     } else {
-        text = "Active Header: ---  (No session started)";
+        text = "---";
         style = "background:#2a2a3a;padding:4px;border-radius:4px;"
                 "color:#aaaaaa;font-family:monospace;font-weight:bold;";
     }
@@ -1202,9 +1140,9 @@ void MainWindow::onRawBusDump()
         QString ts = QDateTime::currentDateTime().toString("HH:mm:ss.zzz");
         m_logText->append(QString("<font color='%1'>[%2] TX: %3</font>").arg(prefix, ts, cmd));
         if (resp.isEmpty())
-            m_logText->append(QString("<font color='red'>       RX: (bos yanit)</font>"));
+            m_logText->append(QString("<font color='#805050'>       RX: (empty response)</font>"));
         else
-            m_logText->append(QString("<font color='#88ff88'>       RX [%1 byte]: %2</font>").arg(resp.size()).arg(hex.trimmed()));
+            m_logText->append(QString("<font color='#60b8a0'>       RX [%1 byte]: %2</font>").arg(resp.size()).arg(hex.trimmed()));
     };
 
     // Phase 1: Motor ECU (K-Line 0x15) - Bosch EDC15C2 bloklari
@@ -1217,7 +1155,7 @@ void MainWindow::onRawBusDump()
     QList<uint8_t> airbagPIDs = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05};
 
     m_logText->append("<font color='white'>========== RAW BUS DUMP STARTED ==========</font>");
-    m_logText->append("<font color='#ffcc00'>--- Motor ECU (0x15) K-Line ---</font>");
+    m_logText->append("<font color='#d09840'>--- Engine ECU (0x15) K-Line ---</font>");
 
     // Phase 1: Motor ECU via K-Line
     m_tcm->rawBusDump(WJDiagnostics::Module::MotorECU, ecuIDs,
@@ -1227,7 +1165,7 @@ void MainWindow::onRawBusDump()
         },
         [this, logHex, tcmPIDs, absPIDs, airbagPIDs]() {
             // Phase 2: TCM via J1850
-            m_logText->append("<font color='#00cccc'>--- TCM (0x28) J1850 VPW ATSH242810 ---</font>");
+            m_logText->append("<font color='#00b8a8'>--- TCM (0x28) J1850 VPW ATSH242810 ---</font>");
             m_tcm->rawBusDump(WJDiagnostics::Module::TCM, tcmPIDs,
                 [this, logHex](uint8_t pid, const QByteArray &data) {
                     QString cmd = QString("22 %1").arg(pid, 2, 16, QChar('0')).toUpper();
@@ -1235,7 +1173,7 @@ void MainWindow::onRawBusDump()
                 },
                 [this, logHex, absPIDs, airbagPIDs]() {
                     // Phase 3: ABS via J1850
-                    m_logText->append("<font color='#ff88ff'>--- ABS (0x40) J1850 VPW ATSH244022 ---</font>");
+                    m_logText->append("<font color='#a080c0'>--- ABS (0x40) J1850 VPW ATSH244022 ---</font>");
                     m_tcm->rawBusDump(WJDiagnostics::Module::ABS, absPIDs,
                         [this, logHex](uint8_t pid, const QByteArray &data) {
                             QString cmd = QString("20 %1").arg(pid, 2, 16, QChar('0')).toUpper();
@@ -1243,7 +1181,7 @@ void MainWindow::onRawBusDump()
                         },
                         [this, logHex, airbagPIDs]() {
                             // Phase 4: Airbag via J1850
-                            m_logText->append("<font color='#ffaa44'>--- Airbag (0x60) J1850 VPW ATSH246022 ---</font>");
+                            m_logText->append("<font color='#c08840'>--- Airbag (0x60) J1850 VPW ATSH246022 ---</font>");
                             m_tcm->rawBusDump(WJDiagnostics::Module::Airbag, airbagPIDs,
                                 [this, logHex](uint8_t pid, const QByteArray &data) {
                                     QString cmd = QString("28 %1").arg(pid, 2, 16, QChar('0')).toUpper();
@@ -1266,15 +1204,15 @@ void MainWindow::onRawSendCustom()
     m_rawCmdEdit->clear();
     QString ts = QDateTime::currentDateTime().toString("HH:mm:ss.zzz");
     if (cmd.startsWith("AT", Qt::CaseInsensitive)) {
-        m_logText->append(QString("<font color='#ff88ff'>[%1] TX (AT): %2</font>").arg(ts, cmd));
+        m_logText->append(QString("<font color='#a080c0'>[%1] TX (AT): %2</font>").arg(ts, cmd));
         m_elm->sendCommand(cmd, [this](const QString &resp) {
-            m_logText->append(QString("<font color='#88ff88'>       RX: %1</font>").arg(resp));
+            m_logText->append(QString("<font color='#60b8a0'>       RX: %1</font>").arg(resp));
         });
     } else {
         QString hexClean = cmd.remove(' ');
-        m_logText->append(QString("<font color='#ff88ff'>[%1] TX (KWP): %2</font>").arg(ts, cmd));
+        m_logText->append(QString("<font color='#a080c0'>[%1] TX (KWP): %2</font>").arg(ts, cmd));
         m_elm->sendCommand(hexClean, [this](const QString &resp) {
-            m_logText->append(QString("<font color='#88ff88'>       RX: %1</font>").arg(resp));
+            m_logText->append(QString("<font color='#60b8a0'>       RX: %1</font>").arg(resp));
         });
     }
 }

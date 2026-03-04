@@ -63,7 +63,7 @@ private:
     QLabel *m_activeHeaderLabel;
     bool m_tcmSessionActive = false;
     bool m_ecuSessionActive = false;
-    QLabel *m_connStatusLabel,*m_elmVersionLabel;
+    QLabel *m_connStatusLabel;
     QTimer *m_batteryTimer = nullptr;  // ATRV periyodik okuma
     QString m_lastLogPath;
     QTableWidget *m_dtcTable; QPushButton *m_readDtcBtn,*m_clearDtcBtn; QLabel *m_dtcCountLabel;

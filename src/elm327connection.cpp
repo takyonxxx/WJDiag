@@ -85,7 +85,7 @@ void ELM327Connection::scanBluetooth()
     emit logMessage("BT scan started...");
     m_btAgent->start(QBluetoothDeviceDiscoveryAgent::ClassicMethod);
 #else
-    emit logMessage("HATA: Bluetooth destegi bu platformda mevcut degil");
+    emit logMessage("ERROR: Bluetooth not available on this platform");
 #endif
 }
 
@@ -120,7 +120,7 @@ void ELM327Connection::connectBluetooth(const QString &address)
     m_btSocket->connectToService(QBluetoothAddress(address), sppUuid);
 #else
     Q_UNUSED(address)
-    emit logMessage("HATA: Bluetooth destegi bu platformda mevcut degil");
+    emit logMessage("ERROR: Bluetooth not available on this platform");
 #endif
 }
 
