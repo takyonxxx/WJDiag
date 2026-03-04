@@ -1,4 +1,4 @@
-#include "kwp2000handler.h"
+﻿#include "kwp2000handler.h"
 #include <QDebug>
 #include <QTimer>
 
@@ -30,9 +30,9 @@ void KWP2000Handler::startDiagnosticSession(SessionType session,
 
         if (success) {
             m_testerPresentTimer->start();
-            emit logMessage("Diagnostik oturum başlatıldı");
+            emit logMessage("Diagnostic session started");
         } else {
-            emit logMessage("Oturum başlatılamadı");
+            emit logMessage("Session start failed");
         }
 
         emit sessionStarted(success);
@@ -55,7 +55,7 @@ void KWP2000Handler::sendTesterPresent()
 
 void KWP2000Handler::readAllDTCs(std::function<void(const QList<DTCInfo>&)> callback)
 {
-    emit logMessage("TCM arıza kodları okunuyor...");
+    emit logMessage("Reading TCM fault codes...");
 
     // KWP2000 ReadDTCByStatus
     // Sub-function: 0x02 = reportDTCByStatusMask
@@ -71,7 +71,7 @@ void KWP2000Handler::readAllDTCs(std::function<void(const QList<DTCInfo>&)> call
         if (payload.isEmpty() || !isPositiveResponse(resp, ReadDTCByStatus)) {
             // Negatif yanıt veya boş - Chrysler/WJ alternatif deneyebiliriz
             // Chrysler bazen SID 0x17 kullanır (ReadDTCByStatus eski versiyon)
-            emit logMessage("Standart DTC okuma başarısız, Chrysler modu deneniyor...");
+            emit logMessage("Standard DTC read failed, trying Chrysler mode...");
 
             QByteArray altData;
             altData.append(static_cast<char>(0xFF)); // tüm hata kodları
@@ -94,10 +94,10 @@ void KWP2000Handler::readAllDTCs(std::function<void(const QList<DTCInfo>&)> call
 
 void KWP2000Handler::clearAllDTCs(std::function<void(bool)> callback)
 {
-    emit logMessage("TCM arıza kodları siliniyor...");
+    emit logMessage("Clearing TCM fault codes...");
 
     // ClearDiagnosticInformation (0x14)
-    // Group: FF FF = tüm DTC'ler
+    // Group: FF FF = all DTCs
     QByteArray data;
     data.append(static_cast<char>(0xFF));
     data.append(static_cast<char>(0xFF));
@@ -106,11 +106,11 @@ void KWP2000Handler::clearAllDTCs(std::function<void(bool)> callback)
         bool success = isPositiveResponse(resp, ClearDTC);
 
         if (success) {
-            emit logMessage("Arıza kodları temizlendi!");
+            emit logMessage("Fault codes cleared!");
         } else {
             uint8_t nrc = 0;
             if (isNegativeResponse(resp, &nrc)) {
-                emit logMessage("DTC silme başarısız: " + nrcToString(nrc));
+                emit logMessage("DTC clear failed: " + nrcToString(nrc));
             }
         }
 
@@ -161,7 +161,7 @@ void KWP2000Handler::readCommonData(uint16_t commonID,
     }, 2000);
 }
 
-// --- I/O Kontrol ---
+// --- I/O Control ---
 
 void KWP2000Handler::controlIO(uint8_t localID, const QByteArray &controlParam,
                                 std::function<void(bool, const QByteArray&)> callback)
@@ -192,11 +192,11 @@ void KWP2000Handler::requestSecuritySeed(std::function<void(const QByteArray&)> 
         // Pozitif yanıt: 67 01 [seed bytes...]
         if (payload.size() >= 3 && static_cast<uint8_t>(payload[0]) == 0x67) {
             QByteArray seed = payload.mid(2); // seed baytları
-            emit logMessage(QString("Security seed alındı (%1 byte)")
+            emit logMessage(QString("Security seed received (%1 bytes)")
                            .arg(seed.size()));
             if (callback) callback(seed);
         } else {
-            emit logMessage("Security seed alınamadı");
+            emit logMessage("Security seed request failed");
             if (callback) callback(QByteArray());
         }
     });
@@ -213,7 +213,7 @@ void KWP2000Handler::sendSecurityKey(const QByteArray &key,
                    [this, callback](const QByteArray &resp) {
         bool success = isPositiveResponse(resp, SecurityAccess);
         if (success) {
-            emit logMessage("Security Access başarılı!");
+            emit logMessage("Security Access successful!");
         } else {
             emit logMessage("Security Access reddedildi");
         }
@@ -300,15 +300,15 @@ QString KWP2000Handler::nrcToString(uint8_t nrc)
     case 0x10: return "Genel Red (General Reject)";
     case 0x11: return "Servis Desteklenmiyor";
     case 0x12: return "Alt Fonksiyon Desteklenmiyor";
-    case 0x21: return "Meşgul - Tekrar Deneyin";
-    case 0x22: return "Koşullar Uygun Değil";
-    case 0x24: return "İstek Sırası Hatası";
-    case 0x31: return "Aralık Dışı İstek";
-    case 0x33: return "Güvenlik Erişimi Reddedildi";
-    case 0x35: return "Geçersiz Anahtar";
-    case 0x36: return "Deneme Sayısı Aşıldı";
+    case 0x21: return "Busy - Retry";
+    case 0x22: return "Conditions Not Correct";
+    case 0x24: return "Request Sequence Error";
+    case 0x31: return "Request Out Of Range";
+    case 0x33: return "Security Access Denied";
+    case 0x35: return "Invalid Key";
+    case 0x36: return "Exceeded Number of Attempts";
     case 0x37: return "Zaman Gecikmesi Bitmedi";
-    case 0x78: return "Yanıt Bekleniyor (ResponsePending)";
+    case 0x78: return "Response Pending";
     default:   return QString("Bilinmeyen NRC: 0x%1").arg(nrc, 2, 16, QChar('0'));
     }
 }
@@ -343,7 +343,7 @@ QList<KWP2000Handler::DTCInfo> KWP2000Handler::parseDTCResponse(const QByteArray
             // İkinci byte bazen DTC sayısı olabilir
             if (data.size() > 1) {
                 uint8_t dtcCount = static_cast<uint8_t>(data[1]);
-                emit logMessage(QString("Toplam %1 arıza kodu bulundu").arg(dtcCount));
+                emit logMessage(QString("Total %1 fault codes found").arg(dtcCount));
                 startIdx = 2;
             }
         }
@@ -391,7 +391,7 @@ QList<KWP2000Handler::DTCInfo> KWP2000Handler::parseDTCResponse(const QByteArray
         dtc.isStored = (status & 0x08) != 0;
         dtc.occurrences = (status >> 4) & 0x0F;
 
-        // Açıklama tablosundan bul
+        // Lookup in description table
         // P2602 → code = 0x2602 → bakalım tabloda var mı
         uint16_t lookupCode = QString("%1%2%3%4")
                               .arg(firstDigit)
@@ -403,13 +403,13 @@ QList<KWP2000Handler::DTCInfo> KWP2000Handler::parseDTCResponse(const QByteArray
         if (s_dtcDescriptions.contains(lookupCode)) {
             dtc.description = s_dtcDescriptions[lookupCode];
         } else {
-            dtc.description = "Tanım bulunamadı";
+            dtc.description = "No description found";
         }
 
         emit logMessage(QString("DTC: %1 - %2 [%3]")
                         .arg(dtc.codeStr)
                         .arg(dtc.description)
-                        .arg(dtc.isActive ? "AKTİF" : "KAYITLI"));
+                        .arg(dtc.isActive ? "ACTIVE" : "STORED"));
 
         dtcList.append(dtc);
     }
@@ -424,55 +424,55 @@ void KWP2000Handler::initDTCTable()
     if (!s_dtcDescriptions.isEmpty()) return;
 
     // Powertrain DTC'ler - NAG1 Transmission
-    s_dtcDescriptions[0x0700] = "Şanzıman Kontrol Sistemi Arızası";
-    s_dtcDescriptions[0x0701] = "Şanzıman Kontrol Sistemi Aralık/Performans";
-    s_dtcDescriptions[0x0702] = "Şanzıman Kontrol Sistemi Elektrik";
-    s_dtcDescriptions[0x0703] = "Tork Konvertörü/Fren Anahtarı B Devresi";
-    s_dtcDescriptions[0x0705] = "Şanzıman Kademe Sensörü A Devresi Arızası";
-    s_dtcDescriptions[0x0706] = "Şanzıman Kademe Sensörü A Devresi Aralık/Performans";
-    s_dtcDescriptions[0x0710] = "Şanzıman Sıvı Sıcaklık Sensörü Devresi";
-    s_dtcDescriptions[0x0711] = "Şanzıman Sıvı Sıcaklık Sensörü Aralık/Performans";
-    s_dtcDescriptions[0x0712] = "Şanzıman Sıvı Sıcaklık Sensörü Devresi Düşük";
-    s_dtcDescriptions[0x0713] = "Şanzıman Sıvı Sıcaklık Sensörü Devresi Yüksek";
-    s_dtcDescriptions[0x0714] = "Şanzıman Sıvı Sıcaklık Sensörü Aralıklı";
-    s_dtcDescriptions[0x0715] = "Türbin/Giriş Mili Hız Sensörü A Devresi";
-    s_dtcDescriptions[0x0716] = "Türbin/Giriş Mili Hız Sensörü A Aralık/Performans";
-    s_dtcDescriptions[0x0720] = "Çıkış Mili Hız Sensörü Devresi";
-    s_dtcDescriptions[0x0721] = "Çıkış Mili Hız Sensörü Aralık/Performans";
-    s_dtcDescriptions[0x0725] = "Motor Devir Giriş Devresi Arızası";
-    s_dtcDescriptions[0x0726] = "Motor Devir Giriş Devresi Aralık/Performans";
-    s_dtcDescriptions[0x0730] = "Yanlış Vites Oranı";
-    s_dtcDescriptions[0x0731] = "1. Vites Oranı Yanlış";
-    s_dtcDescriptions[0x0732] = "2. Vites Oranı Yanlış";
-    s_dtcDescriptions[0x0733] = "3. Vites Oranı Yanlış";
-    s_dtcDescriptions[0x0734] = "4. Vites Oranı Yanlış";
-    s_dtcDescriptions[0x0735] = "5. Vites Oranı Yanlış";
-    s_dtcDescriptions[0x0740] = "Tork Konvertörü Kavrama Devresi Arızası";
-    s_dtcDescriptions[0x0741] = "Tork Konvertörü Kavrama Devresi Performans/Takılı Kapalı";
-    s_dtcDescriptions[0x0742] = "Tork Konvertörü Kavrama Devresi Takılı Açık";
-    s_dtcDescriptions[0x0743] = "Tork Konvertörü Kavrama Devresi Elektrik";
-    s_dtcDescriptions[0x0744] = "Tork Konvertörü Kavrama Devresi Aralıklı";
-    s_dtcDescriptions[0x0748] = "Basınç Kontrol Selenoidi A Elektrik";
-    s_dtcDescriptions[0x0750] = "Vites Selenoidi A Arızası";
-    s_dtcDescriptions[0x0751] = "Vites Selenoidi A Performans/Takılı Kapalı";
-    s_dtcDescriptions[0x0752] = "Vites Selenoidi A Takılı Açık";
-    s_dtcDescriptions[0x0753] = "Vites Selenoidi A Elektrik";
-    s_dtcDescriptions[0x0755] = "Vites Selenoidi B Arızası";
-    s_dtcDescriptions[0x0756] = "Vites Selenoidi B Performans/Takılı Kapalı";
-    s_dtcDescriptions[0x0757] = "Vites Selenoidi B Takılı Açık";
-    s_dtcDescriptions[0x0758] = "Vites Selenoidi B Elektrik";
+    s_dtcDescriptions[0x0700] = "Transmission Control System Malfunction";
+    s_dtcDescriptions[0x0701] = "Transmission Control System Range/Performance";
+    s_dtcDescriptions[0x0702] = "Transmission Control System Electrical";
+    s_dtcDescriptions[0x0703] = "Torque Converter/Brake Switch B Circuit";
+    s_dtcDescriptions[0x0705] = "Transmission Range Sensor A Circuit Malfunction";
+    s_dtcDescriptions[0x0706] = "Transmission Range Sensor A Circuit Range/Performance";
+    s_dtcDescriptions[0x0710] = "Transmission Fluid Temperature Sensor Circuit";
+    s_dtcDescriptions[0x0711] = "Transmission Fluid Temperature Sensor Range/Performance";
+    s_dtcDescriptions[0x0712] = "Transmission Fluid Temperature Sensor Circuit Low";
+    s_dtcDescriptions[0x0713] = "Transmission Fluid Temperature Sensor Circuit High";
+    s_dtcDescriptions[0x0714] = "Transmission Fluid Temperature Sensor Intermittent";
+    s_dtcDescriptions[0x0715] = "Turbine/Input Shaft Speed Sensor A Circuit";
+    s_dtcDescriptions[0x0716] = "Turbine/Input Shaft Speed Sensor A Range/Performance";
+    s_dtcDescriptions[0x0720] = "Output Shaft Speed Sensor Circuit";
+    s_dtcDescriptions[0x0721] = "Output Shaft Speed Sensor Range/Performance";
+    s_dtcDescriptions[0x0725] = "Engine Speed Input Circuit Malfunction";
+    s_dtcDescriptions[0x0726] = "Engine Speed Input Circuit Range/Performance";
+    s_dtcDescriptions[0x0730] = "Incorrect Gear Ratio";
+    s_dtcDescriptions[0x0731] = "Gear 1 Incorrect Ratio";
+    s_dtcDescriptions[0x0732] = "Gear 2 Incorrect Ratio";
+    s_dtcDescriptions[0x0733] = "Gear 3 Incorrect Ratio";
+    s_dtcDescriptions[0x0734] = "Gear 4 Incorrect Ratio";
+    s_dtcDescriptions[0x0735] = "Gear 5 Incorrect Ratio";
+    s_dtcDescriptions[0x0740] = "Torque Converter Clutch Circuit Malfunction";
+    s_dtcDescriptions[0x0741] = "Torque Converter Clutch Circuit Performance/Stuck Off";
+    s_dtcDescriptions[0x0742] = "Torque Converter Clutch Circuit Stuck On";
+    s_dtcDescriptions[0x0743] = "Torque Converter Clutch Circuit Electrical";
+    s_dtcDescriptions[0x0744] = "Torque Converter Clutch Circuit Intermittent";
+    s_dtcDescriptions[0x0748] = "Pressure Control Solenoid A Electrical";
+    s_dtcDescriptions[0x0750] = "Shift Solenoid A Malfunction";
+    s_dtcDescriptions[0x0751] = "Shift Solenoid A Performance/Stuck Off";
+    s_dtcDescriptions[0x0752] = "Shift Solenoid A Stuck On";
+    s_dtcDescriptions[0x0753] = "Shift Solenoid A Electrical";
+    s_dtcDescriptions[0x0755] = "Shift Solenoid B Malfunction";
+    s_dtcDescriptions[0x0756] = "Shift Solenoid B Performance/Stuck Off";
+    s_dtcDescriptions[0x0757] = "Shift Solenoid B Stuck On";
+    s_dtcDescriptions[0x0758] = "Shift Solenoid B Electrical";
 
     // P2XXX - Transmission-specific
-    s_dtcDescriptions[0x2600] = "Selenoid Besleme Voltajı Yüksek";
-    s_dtcDescriptions[0x2601] = "Selenoid Besleme Voltajı Düşük";
-    s_dtcDescriptions[0x2602] = "Selenoid Valfı: Güç Besleme Değeri/Sinyal Aralık Dışı";
-    s_dtcDescriptions[0x2604] = "Selenoid Besleme Devresi Aralıklı";
+    s_dtcDescriptions[0x2600] = "Solenoid Supply Voltage High";
+    s_dtcDescriptions[0x2601] = "Solenoid Supply Voltage Low";
+    s_dtcDescriptions[0x2602] = "Solenoid Valve: Power Supply Value/Signal Out Of Range";
+    s_dtcDescriptions[0x2604] = "Solenoid Supply Circuit Intermittent";
 
     // NAG1 İç Kodlar → OBD eşleştirmesi
-    s_dtcDescriptions[0x2000] = "TCM İç Arıza";
-    s_dtcDescriptions[0x2001] = "N15/3 (ETC Kontrol Modülü) Arızalı";
-    s_dtcDescriptions[0x2065] = "ETC ile İletişim Arızası";
-    s_dtcDescriptions[0x2212] = "Vites Kolu Pozisyonu Mantıksız";
+    s_dtcDescriptions[0x2000] = "TCM Internal Malfunction";
+    s_dtcDescriptions[0x2001] = "N15/3 (ETC Control Module) Malfunction";
+    s_dtcDescriptions[0x2065] = "ETC Communication Malfunction";
+    s_dtcDescriptions[0x2212] = "Gear Lever Position Implausible";
 
     // CAN Bus / İletişim
     s_dtcDescriptions[0x1242] = "CAN Bus - TCM'den Mesaj Yok";
@@ -480,7 +480,7 @@ void KWP2000Handler::initDTCTable()
     s_dtcDescriptions[0x1694] = "PCI Bus - PCM'den Mesaj Yok";
 
     // Limp Mode ilişkili
-    s_dtcDescriptions[0x0501] = "Araç Hız Sensörü 1 Performans";
-    s_dtcDescriptions[0x0562] = "Sistem Voltajı Düşük";
-    s_dtcDescriptions[0x0563] = "Sistem Voltajı Yüksek";
+    s_dtcDescriptions[0x0501] = "Vehicle Speed Sensor 1 Performance";
+    s_dtcDescriptions[0x0562] = "System Voltage Low";
+    s_dtcDescriptions[0x0563] = "System Voltage High";
 }

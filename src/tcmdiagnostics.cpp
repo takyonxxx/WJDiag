@@ -23,14 +23,14 @@ QList<WJDiagnostics::ModuleInfo> WJDiagnostics::allModules()
     return {
         // K-Line modules (ISO 14230-4 KWP fast init)
         // Init sirasi: ATZ -> ATWM -> ATSH -> ATSP5 -> ATFI -> 81 -> 27
-        {Module::MotorECU, "Motor ECU (Bosch EDC15C2 OM612)", "Motor",
+        {Module::MotorECU, "Engine ECU (Bosch EDC15C2 OM612)", "Engine",
          BusType::KLine, "ATSH8115F1", "ATWM8115F13E", "ATSP5"},
-        {Module::KLineTCM, "NAG1 722.6 Sanziman (K-Line)", "KL-TCM",
+        {Module::KLineTCM, "NAG1 722.6 Transmission (K-Line)", "KL-TCM",
          BusType::KLine, "ATSH8120F1", "ATWM8120F13E", "ATSP5"},
 
         // J1850 VPW modules - dogrulanmis header'lar
         // Her modul icin ilk header fonksiyonel (session/reset), okuma icin 22 header
-        {Module::TCM, "NAG1 722.6 Sanziman (EGS52)", "TCM",
+        {Module::TCM, "NAG1 722.6 Transmission (EGS52)", "TCM",
          BusType::J1850, "ATSH242810", "", "ATSP2"},
         {Module::EVIC, "Overhead Console / Pusula", "EVIC",
          BusType::J1850, "ATSH242A22", "", "ATSP2"},
@@ -79,7 +79,7 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
     auto info = moduleInfo(mod);
     BusType newBus = info.bus;
 
-    emit logMessage(QString("Modul: %1 [%2]")
+    emit logMessage(QString("Module: %1 [%2]")
         .arg(info.name, info.bus == BusType::KLine ? "K-Line" : "J1850"));
 
     if (newBus != m_activeBus) {
@@ -87,14 +87,14 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
             // === Jeep WJ 2.7 CRD K-Line init sirasi ===
             // ATZ -> ATWM -> ATSH -> ATSP5 -> ATFI -> 81 -> 27
             // ATWM ve ATSH, ATSP5'ten ONCE gonderilir
-            emit logMessage("K-Line gecisi: ATZ ile tam reset yapiliyor...");
+            emit logMessage("K-Line switch: full ATZ reset...");
             m_elm->sendCommand("ATZ", [this, info, done, targetMod](const QString &atzResp) {
                 if (atzResp.contains("TIMEOUT")) {
-                    emit logMessage("ATZ timeout - ELM327 yanit vermiyor!");
+                    emit logMessage("ATZ timeout - ELM327 not responding!");
                     if (done) done(false);
                     return;
                 }
-                emit logMessage("ATZ OK, K-Line init basliyor...");
+                emit logMessage("ATZ OK, K-Line init starting...");
 
                 // ATE1 + ATH1
                 m_elm->sendCommand("ATE1", [this, info, done, targetMod](const QString&) {
@@ -108,7 +108,7 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                     // ATSP5 - K-Line protokol sec
                     m_elm->sendCommand(info.atspProtocol, [this, info, done, targetMod](const QString &sp5) {
                         if (sp5.contains("TIMEOUT") || sp5.contains("ERROR")) {
-                            emit logMessage("ATSP5 basarisiz - J1850'ye geri donuluyor");
+                            emit logMessage("ATSP5 failed - reverting to J1850");
                             m_elm->sendCommand("ATSP2", [this, done, targetMod](const QString&) {
                                 m_activeBus = BusType::J1850;
                                 if (done) done(false);
@@ -118,8 +118,38 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
 
                     // ATFI - Fast Init (bus init)
                     m_elm->sendCommand("ATFI", [this, info, done, targetMod](const QString &fi) {
-                        if (fi.contains("BUS INIT") || fi.contains("OK")) {
-                            emit logMessage("ATFI OK - K-Line bus init basarili!");
+                        // Check ERROR first - "BUS INIT: ERROR" contains "BUS INIT" too!
+                        if (fi.contains("ERROR") || fi.contains("TIMEOUT") || fi.contains("?")) {
+                            emit logMessage("ATFI failed: " + fi);
+                            // Save previous module before recovery
+                            Module prevMod = m_activeModule;
+                            // Recovery: ATZ -> ATSP2 -> restore previous ATSH
+                            m_elm->sendCommand("ATZ", [this, done, targetMod, prevMod](const QString&) {
+                                QTimer::singleShot(500, this, [this, done, targetMod, prevMod]() {
+                                    m_elm->sendCommand("ATE1", [this, done, targetMod, prevMod](const QString&) {
+                                    m_elm->sendCommand("ATH1", [this, done, targetMod, prevMod](const QString&) {
+                                    m_elm->sendCommand("ATSP2", [this, done, targetMod, prevMod](const QString&) {
+                                        m_activeBus = BusType::J1850;
+                                        // Restore previous J1850 module header if it was active
+                                        auto prevInfo = moduleInfo(prevMod);
+                                        if (prevInfo.bus == BusType::J1850 && !prevInfo.atshHeader.isEmpty()) {
+                                            m_elm->sendCommand(prevInfo.atshHeader, [this, done, prevMod, prevInfo](const QString&) {
+                                                m_activeModule = prevMod;
+                                                emit logMessage(QString("ATFI failed - restored %1 | %2")
+                                                    .arg(prevInfo.shortName, prevInfo.atshHeader));
+                                                if (done) done(false);
+                                            });
+                                        } else {
+                                            emit logMessage("ATFI failed - reverted to J1850");
+                                            if (done) done(false);
+                                        }
+                                    });
+                                    });
+                                    });
+                                });
+                            });
+                        } else if (fi.contains("BUS INIT") || fi.contains("OK")) {
+                            emit logMessage("ATFI OK - K-Line bus init successful!");
                             m_activeModule = targetMod;
                             m_activeBus = BusType::KLine;
 
@@ -133,33 +163,18 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                                     if (seed.contains("67 01")) {
                                         m_elm->sendCommand("27 02 CD 46", [this, done, targetMod](const QString &key) {
                                             emit logMessage("Security key: " + key);
-                                            emit logMessage("K-Line session aktif (ECU hazir)");
+                                            emit logMessage("K-Line session active (ECU ready)");
                                             if (done) done(true);
                                         });
                                     } else {
-                                        emit logMessage("Security atlaniyor, devam ediliyor");
+                                        emit logMessage("Security skipped, continuing");
                                         if (done) done(true);
                                     }
                                 });
                             });
-                        } else if (fi.contains("TIMEOUT") || fi.contains("?") || fi.contains("ERROR")) {
-                            emit logMessage("ATFI basarisiz: " + fi);
-                            // Kurtarma: ATZ -> ATSP2
-                            m_elm->sendCommand("ATZ", [this, done, targetMod](const QString&) {
-                                QTimer::singleShot(500, this, [this, done, targetMod]() {
-                                    m_elm->sendCommand("ATE1", [this, done, targetMod](const QString&) {
-                                    m_elm->sendCommand("ATH1", [this, done, targetMod](const QString&) {
-                                    m_elm->sendCommand("ATSP2", [this, done, targetMod](const QString&) {
-                                        m_activeBus = BusType::J1850;
-                                        emit logMessage("ATFI basarisiz - J1850'ye geri donuldu");
-                                        if (done) done(false);
-                                    });
-                                    });
-                                    });
-                                });
-                            });
                         } else {
-                            emit logMessage("ATFI yanit: " + fi + " (devam ediliyor)");
+                            // Unknown response - try to continue
+                            emit logMessage("ATFI response: " + fi + " (continuing)");
                             m_activeModule = targetMod;
                             m_activeBus = BusType::KLine;
                             if (done) done(true);
@@ -182,18 +197,18 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
             }, 7500); // ATZ timeout
         } else {
             // J1850'ye gecis - ATZ ile temiz baslat + ATIFR0
-            emit logMessage("J1850 gecisi: ATZ ile reset...");
+            emit logMessage("J1850 switch: ATZ reset...");
             m_elm->sendCommand("ATZ", [this, info, done, targetMod](const QString&) {
                 m_elm->sendCommand("ATE1", [this, info, done, targetMod](const QString&) {
                 m_elm->sendCommand("ATH1", [this, info, done, targetMod](const QString&) {
                 m_elm->sendCommand("ATIFR0", [this, info, done, targetMod](const QString&) {
                 m_elm->sendCommand("ATSP2", [this, info, done, targetMod](const QString&) {
                     m_activeBus = BusType::J1850;
-                    emit logMessage("J1850 VPW aktif");
+                    emit logMessage("J1850 VPW active");
                     // Header set
                     m_elm->sendCommand(info.atshHeader, [this, info, done, targetMod](const QString&) {
                         m_activeModule = targetMod;
-                        emit logMessage(QString("Aktif: %1 | %2").arg(info.shortName, info.atshHeader));
+                        emit logMessage(QString("Active: %1 | %2").arg(info.shortName, info.atshHeader));
                         if (done) done(true);
                     });
                 });
@@ -206,7 +221,7 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
         // Ayni bus - sadece header degistir
         m_elm->sendCommand(info.atshHeader, [this, info, done, targetMod](const QString&) {
             m_activeModule = targetMod;
-            emit logMessage(QString("Aktif: %1 | %2").arg(info.shortName, info.atshHeader));
+            emit logMessage(QString("Active: %1 | %2").arg(info.shortName, info.atshHeader));
             if (done) done(true);
         });
     }
@@ -327,11 +342,19 @@ void WJDiagnostics::readECULiveData(std::function<void(const ECUStatus&)> cb)
     auto doNext = std::make_shared<std::function<void()>>();
 
     *doNext = [this, ecu, step, doNext, cb]() {
-        uint8_t ids[] = {0x12, 0x28, 0x20, 0x22, 0x62};
-        if (*step >= 5) {
-            m_lastECU = *ecu;
-            emit ecuStatusUpdated(*ecu);
-            if (cb) cb(*ecu);
+        uint8_t ids[] = {0x12, 0x28, 0x20, 0x22, 0x62, 0xB0, 0xB1, 0xB2};
+        if (*step >= 8) {
+            // Read battery voltage via ATRV after all ECU blocks
+            m_elm->sendCommand("ATRV", [this, ecu, cb](const QString &rv) {
+                // Parse "12.6V" or "13.8V"
+                QString v = rv.trimmed().remove('V').remove('v');
+                bool ok = false;
+                double volts = v.toDouble(&ok);
+                if (ok && volts > 0) ecu->batteryVoltage = volts;
+                m_lastECU = *ecu;
+                emit ecuStatusUpdated(*ecu);
+                if (cb) cb(*ecu);
+            });
             return;
         }
         m_kwp->readLocalData(ids[*step], [this, ecu, step, doNext](const QByteArray &data) {
@@ -340,7 +363,7 @@ void WJDiagnostics::readECULiveData(std::function<void(const ECUStatus&)> cb)
                 parseECUBlock(ids2[*step], data, *ecu);
             }
             (*step)++;
-            QTimer::singleShot(30, *doNext);
+            QTimer::singleShot(340, *doNext);
         });
     };
 
@@ -403,7 +426,7 @@ void WJDiagnostics::readTCMLiveData(std::function<void(const TCMStatus&)> cb)
                         }
                     }
                     (*step)++;
-                    QTimer::singleShot(40, *doNext);
+                    QTimer::singleShot(340, *doNext);
                 });
             };
             (*doNext)();
@@ -457,7 +480,7 @@ void WJDiagnostics::readABSLiveData(std::function<void(const ABSStatus&)> cb)
                         }
                     }
                     (*step)++;
-                    QTimer::singleShot(40, *doNext);
+                    QTimer::singleShot(340, *doNext);
                 });
             };
             (*doNext)();
@@ -484,20 +507,24 @@ void WJDiagnostics::rawBusDump(Module mod, const QList<uint8_t> &ids,
             m_kwp->readLocalData(lid, [idx, readNext, perID, lid](const QByteArray &data) {
                 if (perID) perID(lid, data);
                 (*idx)++;
-                QTimer::singleShot(40, *readNext);
+                QTimer::singleShot(340, *readNext);
             });
         } else {
             QString cmd = QString("22%1").arg(lid, 2, 16, QChar('0'));
             m_elm->sendCommand(cmd, [idx, readNext, perID, lid](const QString &resp) {
                 QByteArray data;
-                QString c = resp; c.remove(' ').remove('\r').remove('\n');
-                for (int i = 0; i + 1 < c.size(); i += 2) {
-                    bool ok; uint8_t b = c.mid(i, 2).toUInt(&ok, 16);
-                    if (ok) data.append(static_cast<char>(b));
+                // Skip invalid responses
+                if (!resp.contains("NO DATA") && !resp.contains("ERROR")
+                    && !resp.contains("?") && !resp.contains("UNABLE")) {
+                    QString c = resp; c.remove(' ').remove('\r').remove('\n');
+                    for (int i = 0; i + 1 < c.size(); i += 2) {
+                        bool ok; uint8_t b = c.mid(i, 2).toUInt(&ok, 16);
+                        if (ok) data.append(static_cast<char>(b));
+                    }
                 }
                 if (perID) perID(lid, data);
                 (*idx)++;
-                QTimer::singleShot(40, *readNext);
+                QTimer::singleShot(340, *readNext);
             });
         }
     };
@@ -506,7 +533,7 @@ void WJDiagnostics::rawBusDump(Module mod, const QList<uint8_t> &ids,
         if (ok) {
             (*readNext)();
         } else {
-            emit logMessage(QString("rawBusDump: %1 modulune gecis basarisiz")
+            emit logMessage(QString("rawBusDump: failed to switch to %1")
                 .arg(moduleInfo(mod).shortName));
             if (done) done();
         }
@@ -582,6 +609,43 @@ void WJDiagnostics::parseECUBlock(uint8_t localID, const QByteArray &d, ECUStatu
             emit logMessage(QString("ECU 2162: egr=%1% wg=%2% maf=%3 alt=%4%")
                 .arg(ecu.egrDuty).arg(ecu.wastegate)
                 .arg(ecu.mafActual).arg(ecu.alternatorDuty));
+        }
+        break;
+    case 0xB0:
+        // Block B0: Injector corrections & adaptation (EDC15C2)
+        // Byte layout based on Bosch EDC15C2 documentation
+        if (n >= 12) {
+            ecu.injCorr[0] = s16(2) / 100.0;  // Injector 1 correction (mg/stroke)
+            ecu.injCorr[1] = s16(4) / 100.0;  // Injector 2 correction
+            ecu.injCorr[2] = s16(6) / 100.0;  // Injector 3 correction
+            ecu.injCorr[3] = s16(8) / 100.0;  // Injector 4 correction
+            ecu.injCorr[4] = s16(10) / 100.0; // Injector 5 correction
+            if (n >= 14)
+                ecu.injLearn = u8(12);         // Injector learn status
+            if (n >= 16)
+                ecu.oilPressure = u8(14) * 0.5; // Oil pressure (bar)
+            emit logMessage(QString("ECU 21B0: inj1=%1 inj2=%2 inj3=%3 inj4=%4 inj5=%5 learn=%6 oil=%7bar")
+                .arg(ecu.injCorr[0],0,'f',2).arg(ecu.injCorr[1],0,'f',2)
+                .arg(ecu.injCorr[2],0,'f',2).arg(ecu.injCorr[3],0,'f',2)
+                .arg(ecu.injCorr[4],0,'f',2).arg(ecu.injLearn)
+                .arg(ecu.oilPressure,0,'f',1));
+        }
+        break;
+    case 0xB1:
+        // Block B1: Boost & idle adaptation
+        if (n >= 6) {
+            ecu.boostAdapt = s16(2) / 10.0;   // Boost adaptation (mbar)
+            ecu.idleAdapt = s16(4) / 10.0;     // Idle speed adaptation (RPM)
+            emit logMessage(QString("ECU 21B1: boostAdapt=%1mbar idleAdapt=%2rpm")
+                .arg(ecu.boostAdapt,0,'f',1).arg(ecu.idleAdapt,0,'f',1));
+        }
+        break;
+    case 0xB2:
+        // Block B2: Fuel quantity adaptation
+        if (n >= 4) {
+            ecu.fuelAdapt = s16(2) / 100.0;   // Fuel adaptation (mg/stroke)
+            emit logMessage(QString("ECU 21B2: fuelAdapt=%1mg")
+                .arg(ecu.fuelAdapt,0,'f',2));
         }
         break;
     }
@@ -774,22 +838,22 @@ QString WJDiagnostics::dtcDescription(const QString &code, Module src)
 // startSession(callback) - compat: referansna gore J1850 VPW TCM (0x28)
 void WJDiagnostics::startSession(std::function<void(bool)> cb)
 {
-    emit logMessage("TCM oturumu baslatiliyor (J1850 VPW 0x28)...");
+    emit logMessage("Starting TCM session (J1850 VPW 0x28)...");
     m_activeBus = BusType::J1850;
     m_activeModule = Module::TCM;
 
     m_elm->sendCommand("ATSP2", [this, cb](const QString&) {
-        QTimer::singleShot(50, this, [this, cb]() {
+        QTimer::singleShot(340, this, [this, cb]() {
             m_elm->sendCommand("ATSH242810", [this, cb](const QString&) {
                 // J1850'de session baslat: SID 0x10 0x89 (DiagSession)
                 m_elm->sendCommand("10 89", [this, cb](const QString &resp) {
                     bool ok = !resp.contains("ERROR") && !resp.contains("NO DATA") && !resp.contains("?");
                     if (ok) {
-                        emit logMessage("TCM J1850 oturumu aktif (ATSH242810)");
+                        emit logMessage("TCM J1850 session active (ATSH242810)");
                         initLiveDataParams();
                     } else {
                         // Bazi moduller session gerektirmez, yine de devam et
-                        emit logMessage("TCM J1850 session yaniti: " + resp + " (devam ediliyor)");
+                        emit logMessage("TCM J1850 session yaniti: " + resp + " (continuing)");
                         initLiveDataParams();
                         ok = true;
                     }
@@ -885,10 +949,17 @@ void WJDiagnostics::readAllLiveData(std::function<void(const TCMStatus&)> cb)
 
     *doNext = [this, tcm, step, doNext, pids, cb]() {
         if (*step >= pids.size()) {
-            fillTCMCompat(*tcm);
-            m_lastTCM = *tcm;
-            emit tcmStatusUpdated(*tcm);
-            if (cb) cb(*tcm);
+            // Read battery voltage via ATRV
+            m_elm->sendCommand("ATRV", [this, tcm, cb](const QString &rv) {
+                QString v = rv.trimmed().remove('V').remove('v');
+                bool ok = false;
+                double volts = v.toDouble(&ok);
+                if (ok && volts > 0) tcm->batteryVoltage = volts;
+                fillTCMCompat(*tcm);
+                m_lastTCM = *tcm;
+                emit tcmStatusUpdated(*tcm);
+                if (cb) cb(*tcm);
+            });
             return;
         }
         uint8_t pid = pids[*step];
@@ -980,7 +1051,7 @@ void WJDiagnostics::readAllLiveData(std::function<void(const TCMStatus&)> cb)
                 }
             }
             (*step)++;
-            QTimer::singleShot(20, *doNext);
+            QTimer::singleShot(340, *doNext);
         });
     };
     (*doNext)();
@@ -1137,7 +1208,7 @@ void WJDiagnostics::initLiveDataParams()
         {0x2D, "Wastegate Solenoid",          "%",     0, 100,  0.39,   0, 1, false},
         {0x30, "Calculated Gear",             "",      0,   7,  1.0,    0, 1, false},
     };
-    emit logMessage(QString("Canli veri: %1 parametre yuklendi (J1850 VPW)").arg(m_liveParams.size()));
+    emit logMessage(QString("Live data: %1 parameters loaded (J1850 VPW)").arg(m_liveParams.size()));
 }
 
 // ioDefinitions - I/O kontrol tanimlari (NAG1 selenoidler)
@@ -1177,7 +1248,7 @@ void WJDiagnostics::readIOStates(std::function<void(const QList<IOState>&)> cb)
             st.isActive = (st.rawValue != 0);
             states->append(st);
             (*idx)++;
-            QTimer::singleShot(30, *readNext);
+            QTimer::singleShot(340, *readNext);
         });
     };
 

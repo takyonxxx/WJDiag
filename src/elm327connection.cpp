@@ -1,4 +1,4 @@
-#include "elm327connection.h"
+﻿#include "elm327connection.h"
 #include <QDebug>
 #include <QRegularExpression>
 
@@ -32,7 +32,7 @@ ELM327Connection::ELM327Connection(QObject *parent)
             name.contains("vLink", Qt::CaseInsensitive) ||
             name.contains("IOS-V", Qt::CaseInsensitive) ||
             name.contains("OBDII", Qt::CaseInsensitive)) {
-            emit logMessage(QString("BT cihaz bulundu: %1 [%2]").arg(name, addr));
+            emit logMessage(QString("BT device found: %1 [%2]").arg(name, addr));
             emit bluetoothDeviceFound(name, addr);
         }
     });
@@ -82,7 +82,7 @@ void ELM327Connection::scanBluetooth()
     if (m_btAgent->isActive())
         m_btAgent->stop();
     setState(ConnectionState::Scanning);
-    emit logMessage("BT tarama baslatildi...");
+    emit logMessage("BT scan started...");
     m_btAgent->start(QBluetoothDeviceDiscoveryAgent::ClassicMethod);
 #else
     emit logMessage("HATA: Bluetooth destegi bu platformda mevcut degil");
@@ -221,7 +221,7 @@ void ELM327Connection::setProtocol(Protocol proto)
             if (resp.contains("OK"))
                 emit logMessage(QString("Protokol: %1").arg(static_cast<int>(proto)));
             else
-                emit errorOccurred("Protokol hata: " + resp);
+                emit errorOccurred("Protocol error: " + resp);
         });
     }
 }
@@ -261,14 +261,14 @@ void ELM327Connection::sendOBDCommand(const QByteArray &hexCmd,
 void ELM327Connection::onSocketConnected()
 {
     QString type = (m_transport == Transport::WiFi) ? "WiFi TCP" : "Bluetooth SPP";
-    emit logMessage(QString("%1 baglanti kuruldu, ELM327 baslatiliyor...").arg(type));
+    emit logMessage(QString("%1 connection established, initializing ELM327...").arg(type));
     setState(ConnectionState::Initializing);
     initializeELM();
 }
 
 void ELM327Connection::onSocketDisconnected()
 {
-    emit logMessage("Baglanti kesildi");
+    emit logMessage("Disconnected");
     setState(ConnectionState::Disconnected);
     emit disconnected();
 }
@@ -291,19 +291,44 @@ void ELM327Connection::onDataReady()
         response = response.trimmed();
         m_responseBuffer.clear();
 
+        // Strip echo: ATE1 is on, first line is the sent command echo
+        // Response format: "COMMAND\r\nACTUAL_RESPONSE"
+        // Remove first line if it matches the sent command
+        if (!m_currentCommand.command.isEmpty()) {
+            QStringList lines = response.split(QRegularExpression("[\\r\\n]+"), Qt::SkipEmptyParts);
+            if (lines.size() > 1 && lines.first().trimmed().compare(
+                    m_currentCommand.command.trimmed(), Qt::CaseInsensitive) == 0) {
+                lines.removeFirst();
+            }
+            response = lines.join("\n").trimmed();
+        }
+
+        // Clean non-printable / non-ASCII garbage (clone ELM327 ATZ junk bytes)
+        QString cleaned;
+        cleaned.reserve(response.size());
+        for (const QChar &ch : response) {
+            ushort u = ch.unicode();
+            if (u == '\n' || (u >= 0x20 && u <= 0x7E))
+                cleaned.append(ch);
+        }
+        // Remove resulting empty lines
+        cleaned = cleaned.split('\n', Qt::SkipEmptyParts).join("\n").trimmed();
+        if (!cleaned.isEmpty())
+            response = cleaned;
+
         emit logMessage(QString::fromUtf8("\xe2\x86\x90 %1").arg(response));
 
         if (m_commandPending && m_currentCommand.callback)
             m_currentCommand.callback(response);
 
         m_commandPending = false;
-        QTimer::singleShot(30, this, &ELM327Connection::processNextCommand);
+        QTimer::singleShot(340, this, &ELM327Connection::processNextCommand);
     }
 }
 
 void ELM327Connection::onCommandTimeout()
 {
-    emit logMessage("Komut zaman asimi!");
+    emit logMessage("Command timeout!");
 
     if (m_commandPending && m_currentCommand.callback)
         m_currentCommand.callback("TIMEOUT");
@@ -391,7 +416,7 @@ void ELM327Connection::initializeELM()
         setState(ConnectionState::Ready);
         emit connected();
         QString type = (m_transport == Transport::WiFi) ? "WiFi" : "Bluetooth";
-        emit logMessage(QString("ELM327 hazir [%1]").arg(type));
+        emit logMessage(QString("ELM327 ready [%1]").arg(type));
     });
 }
 

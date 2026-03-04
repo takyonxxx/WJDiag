@@ -142,7 +142,7 @@ void MainWindow::setupUI()
     setCentralWidget(central);
 
     // Durum çubuğu
-    //statusBar()->showMessage("Bağlantı bekleniyor...");
+    //statusBar()->showMessage("Waiting for connection...");
 }
 
 
@@ -455,21 +455,34 @@ QWidget* MainWindow::createConnectionTab()
     });
 
     connect(m_startEcuBtn, &QPushButton::clicked, this, [this]() {
-        m_ecuSessionActive = !m_ecuSessionActive;
         if (m_ecuSessionActive) {
-            m_startEcuBtn->setText("ECU Active");
-            m_startEcuBtn->setStyleSheet(
-                "QPushButton{background:#2a5a2a;color:#88ff88;border:1px solid #4a8a4a;border-radius:4px;font-weight:bold;}"
-                "QPushButton:hover{background:#3a6a3a;}");
-            statusBar()->showMessage("ECU session active - Engine data ready");
-        } else {
+            // Toggle off
+            m_ecuSessionActive = false;
             m_startEcuBtn->setText("Start ECU Session");
             m_startEcuBtn->setStyleSheet(
                 "QPushButton{background:#3a3a1a;color:white;border:1px solid #6a6a3a;border-radius:4px;}"
                 "QPushButton:hover{background:#4a4a2a;}");
             statusBar()->showMessage("ECU session closed");
+            updateActiveHeaderLabel();
+            return;
         }
-        updateActiveHeaderLabel();
+        // Start ECU session - K-Line init
+        m_startEcuBtn->setEnabled(false);
+        statusBar()->showMessage("Starting ECU session (K-Line)...");
+        m_tcm->switchToModule(WJDiagnostics::Module::MotorECU, [this](bool success) {
+            if (success) {
+                m_ecuSessionActive = true;
+                m_startEcuBtn->setText("ECU Active");
+                m_startEcuBtn->setStyleSheet(
+                    "QPushButton{background:#2a5a2a;color:#88ff88;border:1px solid #4a8a4a;border-radius:4px;font-weight:bold;}"
+                    "QPushButton:hover{background:#3a6a3a;}");
+                statusBar()->showMessage("ECU session active - K-Line ready");
+            } else {
+                statusBar()->showMessage("ECU session failed - K-Line init error");
+            }
+            m_startEcuBtn->setEnabled(true);
+            updateActiveHeaderLabel();
+        });
     });
 
     scroll->setWidget(w);
@@ -630,7 +643,7 @@ QWidget* MainWindow::createLiveDataTab()
     // Live data tablosu
     m_liveTable = new QTableWidget(0, 5);
     m_liveTable->setHorizontalHeaderLabels({
-        "Seç", "Parametre", "Değer", "Birim", "Local ID"
+        "Select", "Parametre", "Value", "Birim", "Local ID"
     });
     m_liveTable->horizontalHeader()->setStretchLastSection(false);
     m_liveTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
@@ -652,7 +665,7 @@ QWidget* MainWindow::createLiveDataTab()
         // İsim
         m_liveTable->setItem(i, 1, new QTableWidgetItem(p.name));
 
-        // Değer
+        // Value
         QTableWidgetItem *valItem = new QTableWidgetItem("---");
         valItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
         QFont valFont;
@@ -717,14 +730,14 @@ QWidget* MainWindow::createIOTab()
     QWidget *w = new QWidget();
     QVBoxLayout *layout = new QVBoxLayout(w);
 
-    m_readIOBtn = new QPushButton("I/O Durumlarını Oku");
+    m_readIOBtn = new QPushButton("Read I/O States");
     m_readIOBtn->setMinimumHeight(34);
     m_readIOBtn->setEnabled(false);
     layout->addWidget(m_readIOBtn);
 
     m_ioTable = new QTableWidget(0, 4);
     m_ioTable->setHorizontalHeaderLabels({
-        "I/O", "Açıklama", "State", "Detay"
+        "I/O", "Description", "State", "Detay"
     });
     m_ioTable->horizontalHeader()->setStretchLastSection(true);
     m_ioTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
@@ -748,8 +761,8 @@ QWidget* MainWindow::createIOTab()
     layout->addWidget(m_ioTable);
 
     QLabel *ioWarning = new QLabel(
-        "DİKKAT: Selenoid aktüasyon testi sadece araç hareketsiz ve şanzıman P/N konumundayken yapın!\n"
-        "Yanlış selenoid aktivasyonu şanzımana zarar verebilir."
+        "WARNING: Solenoid actuation test must only be performed with vehicle stationary and transmission in P/N!\n"
+        "Incorrect solenoid activation may damage the transmission."
     );
     ioWarning->setWordWrap(true);
     ioWarning->setStyleSheet("background: #4a2020; padding: 8px; border-radius: 4px; "
@@ -777,8 +790,8 @@ QWidget* MainWindow::createLogTab()
     QGridLayout *logGrid = new QGridLayout();
     logGrid->setSpacing(4);
 
-    // Satir 0: Temizle | Log Kaydet | Ham Veri Oku
-    QPushButton *clearLogBtn = new QPushButton("Temizle");
+    // Row 0: Clear | Copy Log | Raw Data Read
+    QPushButton *clearLogBtn = new QPushButton("Clear");
     clearLogBtn->setStyleSheet("padding:4px 6px;");
     connect(clearLogBtn, &QPushButton::clicked, m_logText, &QTextEdit::clear);
     logGrid->addWidget(clearLogBtn, 0, 0);
@@ -797,7 +810,7 @@ QWidget* MainWindow::createLogTab()
     });
     logGrid->addWidget(saveLogBtn, 0, 1);
 
-    m_rawDumpBtn = new QPushButton("Ham Veri");
+    m_rawDumpBtn = new QPushButton("Raw Data");
     m_rawDumpBtn->setStyleSheet("background:#2a4858; color:#00ffcc; font-weight:bold; padding:4px 6px;");
     connect(m_rawDumpBtn, &QPushButton::clicked, this, &MainWindow::onRawBusDump);
     logGrid->addWidget(m_rawDumpBtn, 0, 2);
@@ -808,7 +821,7 @@ QWidget* MainWindow::createLogTab()
     m_rawCmdEdit->setStyleSheet("background:#1a1a2e; color:#00ff00; border:1px solid #444; padding:3px;");
     logGrid->addWidget(m_rawCmdEdit, 1, 0, 1, 2);
 
-    m_rawSendBtn = new QPushButton("Gonder");
+    m_rawSendBtn = new QPushButton("Send");
     m_rawSendBtn->setStyleSheet("background:#4a2858; color:#ff88ff; font-weight:bold; padding:4px 6px;");
     connect(m_rawSendBtn, &QPushButton::clicked, this, &MainWindow::onRawSendCustom);
     connect(m_rawCmdEdit, &QLineEdit::returnPressed, this, &MainWindow::onRawSendCustom);
@@ -852,15 +865,15 @@ void MainWindow::onConnectionStateChanged(ELM327Connection::ConnectionState stat
         break;
 
     case ELM327Connection::ConnectionState::Connecting:
-        m_connStatusLabel->setText("Durum: Bağlanıyor...");
+        m_connStatusLabel->setText("Status: Connecting...");
         m_connStatusLabel->setStyleSheet("color: orange; font-weight: bold;");
-        statusBar()->showMessage("Bağlanıyor...");
+        statusBar()->showMessage("Connecting...");
         break;
 
     case ELM327Connection::ConnectionState::Initializing:
-        m_connStatusLabel->setText("Durum: ELM327 Başlatılıyor...");
+        m_connStatusLabel->setText("Status: Initializing ELM327...");
         m_connStatusLabel->setStyleSheet("color: yellow; font-weight: bold;");
-        statusBar()->showMessage("ELM327 başlatılıyor...");
+        statusBar()->showMessage("Initializing ELM327...");
         break;
 
     case ELM327Connection::ConnectionState::Ready:
@@ -969,7 +982,7 @@ void MainWindow::onClearDTCs()
 
 void MainWindow::onStartLiveData()
 {
-    // Seçili parametreleri topla
+    // Selectili parametreleri topla
     QList<uint8_t> selected;
     auto params = m_tcm->liveDataParams();
 
@@ -980,8 +993,8 @@ void MainWindow::onStartLiveData()
     }
 
     if (selected.isEmpty()) {
-        QMessageBox::warning(this, "Parametre Seçimi",
-                             "En az bir parametre seçmelisiniz!");
+        QMessageBox::warning(this, "Parametre Selectimi",
+                             "You must select at least one parameter!");
         return;
     }
 
@@ -990,7 +1003,7 @@ void MainWindow::onStartLiveData()
 
     m_startLiveBtn->setEnabled(false);
     m_stopLiveBtn->setEnabled(true);
-    statusBar()->showMessage("Canlı veri akışı başladı...");
+    statusBar()->showMessage("Live data stream started...");
 }
 
 void MainWindow::onStopLiveData()
@@ -1045,6 +1058,12 @@ void MainWindow::onLiveDataUpdated(const QMap<uint8_t, double> &values)
 void MainWindow::onFullStatusUpdated(const TCMDiagnostics::TCMStatus &status)
 {
     updateStatusLabels(status);
+    // Battery voltage from ATRV (updated in TCM cycle too)
+    if (status.batteryVoltage > 0) {
+        m_dashBatVoltVal->setText(QString::number(status.batteryVoltage, 'f', 1));
+        setGaugeColor(m_dashBatVoltVal,
+            status.batteryVoltage < 11.5 ? "#ff4444" : status.batteryVoltage < 12.5 ? "#ffaa00" : "#00ff88");
+    }
 }
 
 void MainWindow::onECUDataUpdated(const TCMDiagnostics::ECUStatus &ecu)
@@ -1083,11 +1102,11 @@ void MainWindow::onECUDataUpdated(const TCMDiagnostics::ECUStatus &ecu)
 void MainWindow::onReadIO()
 {
     m_readIOBtn->setEnabled(false);
-    statusBar()->showMessage("I/O durumları okunuyor...");
+    statusBar()->showMessage("Reading I/O states...");
 
     m_tcm->readIOStates([this](const QList<TCMDiagnostics::IOState> &states) {
         for (int i = 0; i < states.size() && i < m_ioTable->rowCount(); ++i) {
-            QString statusStr = states[i].isActive ? "AKTİF" : "Kapalı";
+            QString statusStr = states[i].isActive ? "ACTIVE" : "Off";
             m_ioTable->item(i, 2)->setText(statusStr);
 
             if (states[i].isActive) {
@@ -1098,7 +1117,7 @@ void MainWindow::onReadIO()
         }
 
         m_readIOBtn->setEnabled(true);
-        statusBar()->showMessage("I/O durumları güncellendi ✓");
+        statusBar()->showMessage("I/O states updated");
     });
 }
 
@@ -1134,15 +1153,15 @@ void MainWindow::updateActiveHeaderLabel()
     QString text;
     QString style;
     if (m_tcmSessionActive && m_ecuSessionActive) {
-        text = "Aktif: TCM (J1850) + ECU (K-Line)  |  Dual Mode";
+        text = "Active: TCM (J1850) + ECU (K-Line)  |  Dual Mode";
         style = "background:#2a3a2a;padding:4px;border-radius:4px;"
                 "color:#88ffaa;font-family:monospace;font-weight:bold;";
     } else if (m_tcmSessionActive) {
-        text = "Aktif: TCM  |  J1850 VPW  |  ATSH2428xx  |  NAG1 722.6";
+        text = "Active: TCM  |  J1850 VPW  |  ATSH2428xx  |  NAG1 722.6";
         style = "background:#1a3a5a;padding:4px;border-radius:4px;"
                 "color:#88ccff;font-family:monospace;font-weight:bold;";
     } else if (m_ecuSessionActive) {
-        text = "Aktif: ECU  |  ATSH 81 15 F1  |  Motor OM612 (EDC15C2)";
+        text = "Active: ECU  |  ATSH 81 15 F1  |  Engine OM612 (EDC15C2)";
         style = "background:#3a3a1a;padding:4px;border-radius:4px;"
                 "color:#ffcc44;font-family:monospace;font-weight:bold;";
     } else {

@@ -93,6 +93,14 @@ public:
         double coolantSensorV=0, iatSensorV=0;
         double accelPedal1=0, accelPedal2=0;
         double vehicleSpeed=0;
+        // Block 0xB0 - Injector corrections / adaptation
+        double injLearn=0;
+        double oilPressure=0;
+        // Block 0xB1 - Boost adaptation
+        double boostAdapt=0;
+        double idleAdapt=0;
+        // Block 0xB2 - Fuel trims / cold start
+        double fuelAdapt=0;
     };
 
     struct TCMStatus {
