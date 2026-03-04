@@ -30,7 +30,7 @@ QList<WJDiagnostics::ModuleInfo> WJDiagnostics::allModules()
 
         // J1850 VPW modules - verified headers from APK
         {Module::TCM, "NAG1 722.6 Transmission (EGS52)", "TCM",
-         BusType::J1850, "ATSH242810", "", "ATSP2", ""},
+         BusType::J1850, "ATSH242822", "", "ATSP2", ""},
         {Module::EVIC, "Overhead Console (EVIC)", "EVIC",
          BusType::J1850, "ATSH242A22", "", "ATSP2", ""},
         {Module::ABS, "ABS / ESP Braking", "ABS",
@@ -209,7 +209,29 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                         auto finalize = [this, info, done, targetMod]() {
                             m_activeModule = targetMod;
                             emit logMessage(QString("Active: %1 | %2").arg(info.shortName, info.atshHeader));
-                            if (done) done(true);
+
+                            // TCM needs DiagSession before data read (APK verified)
+                            if (targetMod == Module::TCM) {
+                                m_elm->sendCommand("ATSH242810", [this, done](const QString&) {
+                                    QTimer::singleShot(100, this, [this, done]() {
+                                    m_elm->sendCommand("02 00 00", [this, done](const QString &resp) {
+                                        if (resp.contains("50")) {
+                                            emit logMessage("TCM DiagSession OK (50)");
+                                        } else {
+                                            emit logMessage("TCM DiagSession: " + resp);
+                                        }
+                                        // Switch back to data read header
+                                        QTimer::singleShot(100, this, [this, done]() {
+                                        m_elm->sendCommand("ATSH242822", [this, done](const QString&) {
+                                            if (done) done(true);
+                                        });
+                                        });
+                                    });
+                                    });
+                                });
+                            } else {
+                                if (done) done(true);
+                            }
                         };
                         if (!info.atraFilter.isEmpty()) {
                             m_elm->sendCommand(info.atraFilter, [finalize](const QString&) {
@@ -231,7 +253,29 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
             auto finalize = [this, info, done, targetMod]() {
                 m_activeModule = targetMod;
                 emit logMessage(QString("Active: %1 | %2").arg(info.shortName, info.atshHeader));
-                if (done) done(true);
+
+                // TCM needs DiagSession before data read (APK verified)
+                if (targetMod == Module::TCM) {
+                    m_elm->sendCommand("ATSH242810", [this, done](const QString&) {
+                        QTimer::singleShot(100, this, [this, done]() {
+                        m_elm->sendCommand("02 00 00", [this, done](const QString &resp) {
+                            if (resp.contains("50")) {
+                                emit logMessage("TCM DiagSession OK (50)");
+                            } else {
+                                emit logMessage("TCM DiagSession: " + resp);
+                            }
+                            // Switch back to data read header
+                            QTimer::singleShot(100, this, [this, done]() {
+                            m_elm->sendCommand("ATSH242822", [this, done](const QString&) {
+                                if (done) done(true);
+                            });
+                            });
+                        });
+                        });
+                    });
+                } else {
+                    if (done) done(true);
+                }
             };
             if (!info.atraFilter.isEmpty()) {
                 m_elm->sendCommand(info.atraFilter, [finalize](const QString&) {
@@ -291,11 +335,17 @@ void WJDiagnostics::readDTCs(Module mod, std::function<void(const QList<DTCEntry
                 if (cb) cb(r);
             });
         } else {
-            // J1850 VPW DTC read
-            m_elm->sendCommand("18 02 FF 00", [this, mod, cb](const QString &resp) {
-                auto dtcs = decodeJ1850DTCs(resp, mod);
-                emit dtcListReady(mod, dtcs);
-                if (cb) cb(dtcs);
+            // J1850 VPW DTC read: need functional header (SID 0x10/0x14/0x18)
+            uint8_t modAddr = static_cast<uint8_t>(mod);
+            QString funcHeader = QString("ATSH24%1%2")
+                .arg(modAddr, 2, 16, QChar('0'))
+                .arg("10").toUpper();
+            m_elm->sendCommand(funcHeader, [this, mod, cb](const QString&) {
+                m_elm->sendCommand("18 02 FF 00", [this, mod, cb](const QString &resp) {
+                    auto dtcs = decodeJ1850DTCs(resp, mod);
+                    emit dtcListReady(mod, dtcs);
+                    if (cb) cb(dtcs);
+                });
             });
         }
     });
@@ -309,11 +359,18 @@ void WJDiagnostics::clearDTCs(Module mod, std::function<void(bool)> cb)
         if (moduleInfo(mod).bus == BusType::KLine) {
             m_kwp->clearAllDTCs(cb);
         } else {
-            m_elm->sendCommand("14 00 00", [this, mod, cb](const QString &resp) {
-                bool ok = !resp.contains("7F") && !resp.contains("ERROR");
-                emit logMessage(QString("%1 DTC clear: %2")
-                    .arg(moduleName(mod), ok ? "OK" : "FAIL"));
-                if (cb) cb(ok);
+            // J1850: switch to functional header for ClearDTC (SID 0x14)
+            uint8_t modAddr = static_cast<uint8_t>(mod);
+            QString funcHeader = QString("ATSH24%1%2")
+                .arg(modAddr, 2, 16, QChar('0'))
+                .arg("14").toUpper();
+            m_elm->sendCommand(funcHeader, [this, mod, cb](const QString&) {
+                m_elm->sendCommand("14 00 00", [this, mod, cb](const QString &resp) {
+                    bool ok = !resp.contains("7F") && !resp.contains("ERROR");
+                    emit logMessage(QString("%1 DTC clear: %2")
+                        .arg(moduleName(mod), ok ? "OK" : "FAIL"));
+                    if (cb) cb(ok);
+                });
             });
         }
     });
@@ -871,11 +928,25 @@ void WJDiagnostics::startSession(std::function<void(bool)> cb)
 
     m_elm->sendCommand("ATSP2", [this, cb](const QString&) {
         QTimer::singleShot(340, this, [this, cb]() {
+            // DiagSession: ATSH242810 → "02 00 00" → wait "50"
             m_elm->sendCommand("ATSH242810", [this, cb](const QString&) {
-                // J1850 TCM: no diagnostic session start needed (APK confirmed)
-                emit logMessage("TCM J1850 session active (ATSH242810)");
-                initLiveDataParams();
-                if (cb) cb(true);
+                QTimer::singleShot(100, this, [this, cb]() {
+                m_elm->sendCommand("02 00 00", [this, cb](const QString &resp) {
+                    if (resp.contains("50")) {
+                        emit logMessage("TCM DiagSession OK (50)");
+                    } else {
+                        emit logMessage("TCM DiagSession: " + resp);
+                    }
+                    // Switch to data read header
+                    QTimer::singleShot(100, this, [this, cb]() {
+                    m_elm->sendCommand("ATSH242822", [this, cb](const QString&) {
+                        emit logMessage("TCM J1850 session active (ATSH242822)");
+                        initLiveDataParams();
+                        if (cb) cb(true);
+                    });
+                    });
+                });
+                });
             });
         });
     });
@@ -959,10 +1030,27 @@ void WJDiagnostics::readAllLiveData(std::function<void(const TCMStatus&)> cb)
         0x2C, // Swirl Solenoid (1B)
         0x2D, // Wastegate Solenoid (1B, *0.39%)
         0x30, // Calculated Gear (1B)
+        // APK extra PIDs
+        0x00, // Unknown/Status (1B)
+        0x05, // Unknown (1B)
+        0x06, // Unknown (1B)
+        0x07, // Unknown (1B)
+        0x08, // Unknown (1B)
+        0x09, // Unknown (1B)
+        0x0D, // Unknown (1B)
+        0x50, // Adaptation Value 1 (2B)
+        0x51, // Adaptation Value 2 (2B)
+        0x52, // Adaptation Value 3 (2B)
+        0x53, // Adaptation Value 4 (2B)
+        0x54, // Adaptation Value 5 (2B)
     };
 
-    // Oncelikle ATSH242822 ayarla
-    m_elm->sendCommand("ATSH242822", [this, tcm, step, doNext, pids, cb](const QString&) {
+    // Ensure J1850 bus and correct header via switchToModule
+    switchToModule(Module::TCM, [this, tcm, step, doNext, pids, cb](bool ok) {
+        if (!ok) { if (cb) cb(*tcm); return; }
+
+    // ATSH242822 already set by switchToModule (TCM default header)
+    // Start reading PIDs
 
     *doNext = [this, tcm, step, doNext, pids, cb]() {
         if (*step >= pids.size()) {
@@ -1073,7 +1161,7 @@ void WJDiagnostics::readAllLiveData(std::function<void(const TCMStatus&)> cb)
     };
     (*doNext)();
 
-    }); // ATSH242822 callback end
+    }); // switchToModule(TCM) callback end
 }
 
 // readSingleParam - J1850 VPW tek PID oku

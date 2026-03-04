@@ -24,6 +24,10 @@
 #include <QCoreApplication>
 #endif
 
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#include <QPermissions>
+#endif
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
@@ -111,7 +115,6 @@ void MainWindow::setupUI()
     mainLayout->setSpacing(4);
 #endif
 
-    // === ÜST PANEL: Durum Göstergeleri ===
     // === DASHBOARD PANEL (11 gauge) ===
     mainLayout->addWidget(createDashboardPanel());
     m_throttleBar = new QProgressBar();
@@ -122,15 +125,30 @@ void MainWindow::setupUI()
     // === TABLAR ===
     m_tabs = new QTabWidget();
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-    // Mobil: kompakt tab basliklari
     m_tabs->setStyleSheet(
-        "QTabWidget::pane{border:1px solid #1a3050;border-top:none;}"
-        "QTabBar::tab{background:#0e1828;color:#6090a8;padding:10px 14px;"
-        "border:1px solid #1a3050;border-bottom:none;border-radius:4px 4px 0 0;"
-        "font-size:14px;min-width:50px;font-weight:500;}"
-        "QTabBar::tab:selected{background:#122840;color:#00d4b4;font-weight:bold;border-bottom:2px solid #00d4b4;}"
+        "QTabWidget::pane { border: 1px solid #1a3050; border-top: none; }"
+        "QTabBar::tab {"
+        "background: #0e1828; color: #6090a8; padding: 10px 14px;"
+        "border: 1px solid #1a3050; border-bottom: none; border-radius: 4px 4px 0 0;"
+        "font-size: 14px; min-width: 40px; font-weight: 500;"
+        "}"
+        "QTabBar::tab:selected {"
+        "background: #122840; color: #00d4b4; font-weight: bold; border-bottom: 2px solid #00d4b4;"
+        "}"
+        "QScrollBar:vertical { width: 0px; background: transparent; }"
+        "QScrollBar:horizontal { height: 0px; background: transparent; }"
+        "QTabBar::scroller { width: 0px; }"
+        "QTabBar QToolButton { width: 0px; height: 0px; }"
     );
     m_tabs->tabBar()->setExpanding(true);
+    m_tabs->tabBar()->setUsesScrollButtons(false);
+    // Disable scroll policies on existing tab pages
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        if (auto *scrollArea = qobject_cast<QAbstractScrollArea*>(m_tabs->widget(i))) {
+            scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        }
+    }
 #endif
     m_tabs->addTab(createConnectionTab(), "Connect");
     m_tabs->addTab(createDTCTab(),        "Faults");
@@ -141,8 +159,8 @@ void MainWindow::setupUI()
     mainLayout->addWidget(m_tabs);
     setCentralWidget(central);
 
-    // Durum çubuğu
-    //statusBar()->showMessage("Waiting for connection...");
+    // Status bar
+    statusBar()->showMessage("Waiting for connection...");
 }
 
 
@@ -180,27 +198,31 @@ QWidget* MainWindow::createDashboardPanel()
 {
     QWidget *p = new QWidget();
     QGridLayout *g = new QGridLayout(p);
-    g->setContentsMargins(2,2,2,2); g->setSpacing(3);
+    g->setContentsMargins(2,2,2,2);
+    g->setSpacing(3);
 
-    // Row 0: Vites, Hiz, Turbin RPM, Trans Sicaklik
-    g->addWidget(createGaugeCard("GEAR","---","",&m_dashGearVal,&m_dashGearUnit), 0,0);
-    g->addWidget(createGaugeCard("SPEED","---","km/h",&m_dashSpeedVal,&m_dashSpeedUnit), 0,1);
-    g->addWidget(createGaugeCard("TURBIN","---","rpm",&m_dashRpmVal,&m_dashRpmUnit), 0,2);
-    g->addWidget(createGaugeCard("TRANS","---","C",&m_dashCoolantVal,&m_dashCoolantUnit), 0,3);
+    // --- SATIR 0: ANA SÜRÜŞ GÖSTERGELERİ ---
+    // En kritik veriler en üstte
+    g->addWidget(createGaugeCard("SPEED", "---", "km/h", &m_dashSpeedVal, &m_dashSpeedUnit), 0, 0);
+    g->addWidget(createGaugeCard("GEAR",  "---", "",     &m_dashGearVal,  &m_dashGearUnit),  0, 1);
+    g->addWidget(createGaugeCard("RPM",   "---", "rpm",  &m_dashMotRpmVal, &m_dashMotRpmUnit), 0, 2);
+    g->addWidget(createGaugeCard("TURBIN","---", "rpm",  &m_dashRpmVal,    &m_dashRpmUnit),    0, 3);
 
-    // Row 1: Selenoid V, Aku V, Su Sicak (Motor), Limp
-    g->addWidget(createGaugeCard("SOL V","---","V",&m_dashSolVoltVal,&m_dashSolVoltUnit), 1,0);
-    g->addWidget(createGaugeCard("BATT","---","V",&m_dashBatVoltVal,&m_dashBatVoltUnit), 1,1);
-    g->addWidget(createGaugeCard("SU","---","C",&m_dashMotCoolVal,&m_dashMotCoolUnit), 1,2);
-    g->addWidget(createGaugeCard("LIMP","---","",&m_dashLimpVal,&m_dashLimpUnit), 1,3);
+    // --- SATIR 1: MOTOR PERFORMANS (ECU) ---
+    // Hava ve yakıt verileri yan yana
+    g->addWidget(createGaugeCard("BOOST", "---", "mbar", &m_dashMotBoostVal, &m_dashMotBoostUnit), 1, 0);
+    g->addWidget(createGaugeCard("MAF",   "---", "mg/s", &m_dashMotMafVal,   &m_dashMotMafUnit),   1, 1);
+    g->addWidget(createGaugeCard("RAIL",  "---", "bar",  &m_dashMotRailVal,  &m_dashMotRailUnit),  1, 2);
+    g->addWidget(createGaugeCard("LIMP",  "---", "",     &m_dashLimpVal,     &m_dashLimpUnit),     1, 3);
 
-    // Row 2: Motor ECU verileri (DUAL modda guncellenir)
-    g->addWidget(createGaugeCard("M.RPM","---","rpm",&m_dashMotRpmVal,&m_dashMotRpmUnit), 2,0);
-    g->addWidget(createGaugeCard("BOOST","---","mbar",&m_dashMotBoostVal,&m_dashMotBoostUnit), 2,1);
-    g->addWidget(createGaugeCard("MAF","---","mg/s",&m_dashMotMafVal,&m_dashMotMafUnit), 2,2);
-    g->addWidget(createGaugeCard("RAIL","---","bar",&m_dashMotRailVal,&m_dashMotRailUnit), 2,3);
+    // --- SATIR 2: SİSTEM SAĞLIĞI & VOLTAJ ---
+    // Sıcaklıklar ve elektrik durumu
+    g->addWidget(createGaugeCard("M-TEMP","---", "C",    &m_dashMotCoolVal,  &m_dashMotCoolUnit), 2, 0); // Motor Su
+    g->addWidget(createGaugeCard("T-TEMP","---", "C",    &m_dashCoolantVal,  &m_dashCoolantUnit),     2, 1); // Trans Yağ
+    g->addWidget(createGaugeCard("BATT",  "---", "V",    &m_dashBatVoltVal,  &m_dashBatVoltUnit),     2, 2);
+    g->addWidget(createGaugeCard("SOL V", "---", "V",    &m_dashSolVoltVal,  &m_dashSolVoltUnit),     2, 3);
 
-    for(int c=0;c<4;++c) g->setColumnStretch(c,1);
+    for(int c=0; c<4; ++c) g->setColumnStretch(c, 1);
     return p;
 }
 
@@ -363,9 +385,13 @@ QWidget* MainWindow::createConnectionTab()
     // Bluetooth butonlari
     connect(m_btScanBtn, &QPushButton::clicked, this, [this]() {
         m_btCombo->clear();
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+        requestBluetoothPermissions();
+#else
         m_btScanBtn->setText("Scanning...");
         m_btScanBtn->setEnabled(false);
         m_elm->scanBluetooth();
+#endif
     });
     connect(m_btConnectBtn, &QPushButton::clicked, this, [this]() {
         if (m_btCombo->currentIndex() >= 0) {
@@ -1165,7 +1191,7 @@ void MainWindow::onRawBusDump()
         },
         [this, logHex, tcmPIDs, absPIDs, airbagPIDs]() {
             // Phase 2: TCM via J1850
-            m_logText->append("<font color='#00b8a8'>--- TCM (0x28) J1850 VPW ATSH242810 ---</font>");
+            m_logText->append("<font color='#00b8a8'>--- TCM (0x28) J1850 VPW ATSH242822 ---</font>");
             m_tcm->rawBusDump(WJDiagnostics::Module::TCM, tcmPIDs,
                 [this, logHex](uint8_t pid, const QByteArray &data) {
                     QString cmd = QString("22 %1").arg(pid, 2, 16, QChar('0')).toUpper();
@@ -1216,3 +1242,63 @@ void MainWindow::onRawSendCustom()
         });
     }
 }
+
+// --- Bluetooth scan helper ---
+
+void MainWindow::scanBluetoothDevices()
+{
+    m_btScanBtn->setText("Scanning...");
+    m_btScanBtn->setEnabled(false);
+    m_elm->scanBluetooth();
+}
+
+// --- Bluetooth permissions (Android/iOS) ---
+
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+void MainWindow::requestBluetoothPermissions()
+{
+    QBluetoothPermission bluetoothPermission;
+    bluetoothPermission.setCommunicationModes(QBluetoothPermission::Access);
+
+    switch (qApp->checkPermission(bluetoothPermission)) {
+    case Qt::PermissionStatus::Undetermined:
+        qApp->requestPermission(bluetoothPermission, this,
+            [this](const QPermission &permission) {
+                if (qApp->checkPermission(permission) == Qt::PermissionStatus::Granted) {
+                    scanBluetoothDevices();
+                } else {
+                    onLogMessage("Bluetooth permission denied. Cannot scan.");
+                }
+            });
+        break;
+    case Qt::PermissionStatus::Granted:
+        scanBluetoothDevices();
+        break;
+    case Qt::PermissionStatus::Denied:
+        onLogMessage("Bluetooth permission denied. Please enable in Settings.");
+        break;
+    }
+
+#ifdef Q_OS_ANDROID
+    // Android requires location permission for Bluetooth scanning
+    QLocationPermission locationPermission;
+    locationPermission.setAccuracy(QLocationPermission::Approximate);
+
+    switch (qApp->checkPermission(locationPermission)) {
+    case Qt::PermissionStatus::Undetermined:
+        qApp->requestPermission(locationPermission, this,
+            [this](const QPermission &permission) {
+                if (qApp->checkPermission(permission) != Qt::PermissionStatus::Granted) {
+                    onLogMessage("Location permission denied. BT scanning may not work.");
+                }
+            });
+        break;
+    case Qt::PermissionStatus::Granted:
+        break;
+    case Qt::PermissionStatus::Denied:
+        onLogMessage("Location permission denied. BT scanning may not work.");
+        break;
+    }
+#endif
+}
+#endif

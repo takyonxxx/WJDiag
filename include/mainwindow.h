@@ -37,6 +37,10 @@ private slots:
     void onLogMessage(const QString&);
     void onRawBusDump();
     void onRawSendCustom();
+    void scanBluetoothDevices();
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+    void requestBluetoothPermissions();
+#endif
 private:
     void setupUI();
     QWidget* createDashboardPanel();

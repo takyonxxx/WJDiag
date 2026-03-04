@@ -29,6 +29,7 @@ ELM327Connection::ELM327Connection(QObject *parent)
         bool isBLE = (info.coreConfigurations() & QBluetoothDeviceInfo::LowEnergyCoreConfiguration);
         QString type = isBLE ? "BLE" : "Classic";
 
+
         if (name.isEmpty())
             return;
 
