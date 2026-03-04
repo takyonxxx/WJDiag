@@ -29,11 +29,6 @@ ELM327Connection::ELM327Connection(QObject *parent)
         bool isBLE = (info.coreConfigurations() & QBluetoothDeviceInfo::LowEnergyCoreConfiguration);
         QString type = isBLE ? "BLE" : "Classic";
 
-        // Log ALL discovered devices via qDebug for desktop debugging
-        qDebug() << "[BT SCAN]" << type << "|" << name << "|" << addr
-                 << "| RSSI:" << info.rssi()
-                 << "| Services:" << info.serviceUuids().size();
-
         if (name.isEmpty())
             return;
 
@@ -53,9 +48,10 @@ ELM327Connection::ELM327Connection(QObject *parent)
         if (match) {
             emit logMessage(QString("BT device found: %1 [%2] (%3)").arg(name, addr, type));
             emit bluetoothDeviceFound(name, addr);
-        } else {
-            // Log non-matching devices too (to app log)
-            emit logMessage(QString("BT device skipped: %1 [%2] (%3)").arg(name, addr, type));
+            m_btAgent->stop();
+            if (m_state == ConnectionState::Scanning)
+                setState(ConnectionState::Disconnected);
+            emit bluetoothScanFinished();
         }
     });
     connect(m_btAgent, &QBluetoothDeviceDiscoveryAgent::finished,

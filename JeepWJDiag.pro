@@ -35,5 +35,9 @@ android {
 }
 
 DISTFILES += \
+    android/AndroidManifest.xml \
+    android/build.gradle \
+    android/res/values/libs.xml \
+    android/res/xml/qtprovider_paths.xml \
     ios/Info.plist \
     macos/Info.plist
