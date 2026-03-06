@@ -208,6 +208,7 @@ signals:
 
 private:
     void parseECUBlock(uint8_t lid, const QByteArray &d, ECUStatus &ecu);
+    void parseTCMBlock30(const QByteArray &raw, TCMStatus &tcm);
     void fillTCMCompat(TCMStatus &tcm);
     void initLiveDataParams();
     void _finishLegacySession(std::function<void(bool)> cb);

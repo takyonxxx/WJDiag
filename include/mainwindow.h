@@ -44,8 +44,8 @@ private slots:
 #endif
 private:
     void setupUI();
-    void phase3_ABS(
-        std::function<void(const QString&, const QString&, const QByteArray&)> logHex,
+    void phase2_ExtraBlocks(
+        
         std::function<void(const QString&, const QString&)> logRaw);
     QWidget* createDashboardPanel();
     QFrame* createGaugeCard(const QString&,const QString&,const QString&,QLabel**,QLabel**);

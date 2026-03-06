@@ -160,15 +160,15 @@ void LiveDataManager::pollECU(std::function<void()> then)
 
         // ECU verilerini virtual ID'lerle dataUpdated signal'ina ekle
         QMap<uint8_t, double> ecuValues;
-        ecuValues[0xE0] = ecu.rpm;
-        ecuValues[0xE1] = ecu.coolantTemp;
-        ecuValues[0xE2] = ecu.iat;
-        ecuValues[0xE3] = ecu.tps;
-        ecuValues[0xE4] = ecu.boostPressure;
-        ecuValues[0xE5] = ecu.mafActual;
-        ecuValues[0xE6] = ecu.railActual;
-        ecuValues[0xE7] = ecu.injectionQty;
-        ecuValues[0xE8] = ecu.batteryVoltage;
+        ecuValues[0xF0] = ecu.rpm;
+        ecuValues[0xF1] = ecu.coolantTemp;
+        ecuValues[0xF2] = ecu.iat;
+        ecuValues[0xF3] = ecu.tps;
+        ecuValues[0xF4] = ecu.boostPressure;
+        ecuValues[0xF5] = ecu.mafActual;
+        ecuValues[0xF6] = ecu.railActual;
+        ecuValues[0xF7] = ecu.injectionQty;
+        ecuValues[0xF8] = ecu.batteryVoltage;
         // Merge with existing TCM values
         for (auto it = ecuValues.begin(); it != ecuValues.end(); ++it)
             m_lastValues[it.key()] = it.value();

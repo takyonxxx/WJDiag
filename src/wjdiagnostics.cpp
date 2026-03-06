@@ -491,39 +491,33 @@ void WJDiagnostics::readECULiveData(std::function<void(const ECUStatus&)> cb)
 
 void WJDiagnostics::readTCMLiveData(std::function<void(const TCMStatus&)> cb)
 {
-    // K-Line TCM (0x20) ReadLocalData
+    // K-Line TCM (0x20) - Read block 0x30 for live data
     auto tcm = std::make_shared<TCMStatus>();
 
     switchToModule(Module::KLineTCM, [this, tcm, cb](bool ok) {
         if (!ok) { if (cb) cb(*tcm); return; }
 
-        // KWP2000 ReadLocalData blocks for NAG1 722.6
-        // Block numbers TBD - need real vehicle block scan first
-        auto step = std::make_shared<int>(0);
-        auto doNext = std::make_shared<std::function<void()>>();
-        QList<uint8_t> blocks = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
-
-        *doNext = [this, tcm, step, doNext, blocks, cb]() {
-            if (*step >= blocks.size()) {
-                m_lastTCM = *tcm;
-                emit tcmStatusUpdated(*tcm);
-                if (cb) cb(*tcm);
-                return;
-            }
-            uint8_t blk = blocks[*step];
-            QString cmd = QString("21 %1").arg(blk, 2, 16, QChar('0')).toUpper();
-            m_elm->sendCommand(cmd, [this, tcm, step, doNext, blk](const QString &resp) {
-                // Parse KWP response: look for "61 xx" positive response
-                if (!resp.contains("NO DATA") && !resp.contains("7F") && !resp.contains("ERROR")) {
-                    emit logMessage(QString("TCM blk 0x%1: %2")
-                        .arg(blk, 2, 16, QChar('0')).arg(resp.trimmed()));
-                    // TODO: parse TCM block data after block discovery
+        m_elm->sendCommand("21 30", [this, tcm, cb](const QString &resp) {
+            if (!resp.contains("NO DATA") && !resp.contains("7F") && !resp.contains("ERROR")) {
+                QByteArray raw;
+                QString cleaned = resp;
+                cleaned.remove(' ').remove('\r').remove('\n');
+                int pos = cleaned.indexOf("6130", 0, Qt::CaseInsensitive);
+                if (pos >= 0) {
+                    QString dataHex = cleaned.mid(pos);
+                    if (dataHex.length() > 4) dataHex.chop(2);
+                    for (int i = 0; i + 1 < dataHex.length(); i += 2) {
+                        bool ok2;
+                        uint8_t b = dataHex.mid(i, 2).toUInt(&ok2, 16);
+                        if (ok2) raw.append(static_cast<char>(b));
+                    }
                 }
-                (*step)++;
-                QTimer::singleShot(340, *doNext);
-            });
-        };
-        (*doNext)();
+                if (raw.size() >= 4) parseTCMBlock30(raw, *tcm);
+            }
+            m_lastTCM = *tcm;
+            emit tcmStatusUpdated(*tcm);
+            if (cb) cb(*tcm);
+        });
     });
 }
 
@@ -985,27 +979,39 @@ void WJDiagnostics::clearDTCs(std::function<void(bool)> cb)
     clearDTCs(m_activeModule, cb);
 }
 
-// readAllLiveData - K-Line TCM (0x20) ReadLocalData blocks
-// readAllLiveData - K-Line TCM (0x20) ReadLocalData blocks
+// readAllLiveData - K-Line TCM (0x20) Block 0x30 = transmission live data
 void WJDiagnostics::readAllLiveData(std::function<void(const TCMStatus&)> cb)
 {
     auto tcm = std::make_shared<TCMStatus>();
-    auto step = std::make_shared<int>(0);
-    auto doNext = std::make_shared<std::function<void()>>();
-
-    // K-Line TCM ReadLocalData blocks - will be refined after block scan
-    // For now try common Mercedes 722.6 EGS52 blocks
-    QList<uint8_t> blocks = {
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-        0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10
-    };
 
     // Switch to K-Line TCM
-    switchToModule(Module::KLineTCM, [this, tcm, step, doNext, blocks, cb](bool ok) {
+    switchToModule(Module::KLineTCM, [this, tcm, cb](bool ok) {
         if (!ok) { if (cb) cb(*tcm); return; }
 
-    *doNext = [this, tcm, step, doNext, blocks, cb]() {
-        if (*step >= blocks.size()) {
+        // Read block 0x30 - contains 22 bytes of live transmission data
+        m_elm->sendCommand("21 30", [this, tcm, cb](const QString &resp) {
+            // Parse KWP response: find "61 30" positive response
+            if (!resp.contains("NO DATA") && !resp.contains("7F") && !resp.contains("ERROR")) {
+                QByteArray raw;
+                QString cleaned = resp;
+                cleaned.remove(' ').remove('\r').remove('\n');
+                int pos = cleaned.indexOf("6130", 0, Qt::CaseInsensitive);
+                if (pos >= 0) {
+                    // Strip checksum: everything from "6130" to end minus last 2 chars (checksum byte)
+                    QString dataHex = cleaned.mid(pos);
+                    // Remove last byte (checksum)
+                    if (dataHex.length() > 4) dataHex.chop(2);
+                    for (int i = 0; i + 1 < dataHex.length(); i += 2) {
+                        bool ok2;
+                        uint8_t b = dataHex.mid(i, 2).toUInt(&ok2, 16);
+                        if (ok2) raw.append(static_cast<char>(b));
+                    }
+                }
+                // raw[0]=0x61, raw[1]=0x30, raw[2..23]=22 bytes data
+                if (raw.size() >= 4) {
+                    parseTCMBlock30(raw, *tcm);
+                }
+            }
             // Read battery voltage
             m_elm->sendCommand("ATRV", [this, tcm, cb](const QString &rv) {
                 QString v = rv.trimmed().remove('V').remove('v');
@@ -1016,44 +1022,61 @@ void WJDiagnostics::readAllLiveData(std::function<void(const TCMStatus&)> cb)
                 emit tcmStatusUpdated(*tcm);
                 if (cb) cb(*tcm);
             });
-            return;
-        }
-        uint8_t blk = blocks[*step];
-        // KWP2000 ReadLocalData: SID 0x21 + block number
-        QString cmd = QString("21 %1").arg(blk, 2, 16, QChar('0')).toUpper();
-
-        m_elm->sendCommand(cmd, [this, tcm, step, doNext, blk](const QString &resp) {
-            // KWP response: 83 F1 20 61 xx ... checksum
-            // Parse: find "61 xx" in response
-            if (!resp.contains("NO DATA") && !resp.contains("7F") && !resp.contains("ERROR")) {
-                // Extract data bytes after header
-                QByteArray raw;
-                QString cleaned = resp;
-                cleaned.remove(' ').remove('\r').remove('\n');
-                // Find "61" + block hex in cleaned string
-                QString blkHex = QString("61%1").arg(blk, 2, 16, QChar('0')).toUpper();
-                int pos = cleaned.indexOf(blkHex, 0, Qt::CaseInsensitive);
-                if (pos >= 0) {
-                    QString dataHex = cleaned.mid(pos);
-                    for (int i = 0; i + 1 < dataHex.length(); i += 2) {
-                        bool ok2;
-                        uint8_t b = dataHex.mid(i, 2).toUInt(&ok2, 16);
-                        if (ok2) raw.append(static_cast<char>(b));
-                    }
-                    // raw[0]=0x61, raw[1]=blk, raw[2...]=data
-                    if (raw.size() >= 3) {
-                        emit logMessage(QString("TCM blk 0x%1: %2 bytes")
-                            .arg(blk, 2, 16, QChar('0')).arg(raw.size() - 2));
-                        // TODO: parse TCM block data after block discovery
-                    }
-                }
-            }
-            (*step)++;
-            QTimer::singleShot(340, *doNext);
         });
-    };
-    (*doNext)();
     });
+}
+
+// parseTCMBlock30 - decode block 0x30 live data (22 bytes)
+// Byte mapping TBD - initial test data at idle/P:
+// 98 F1 20 61 30 | 00 1A 00 1E 00 00 00 08 04 00 DD 61 FF F7 FF F7 00 00 96 18 00 08
+// Byte offsets after "61 30": [0]=00 [1]=1A [2]=00 [3]=1E ...
+void WJDiagnostics::parseTCMBlock30(const QByteArray &raw, TCMStatus &tcm)
+{
+    // raw[0]=0x61, raw[1]=0x30, raw[2..]=data bytes
+    int n = raw.size();
+    if (n < 4) return;
+
+    auto u8 = [&](int i) -> uint8_t { return (i+2 < n) ? static_cast<uint8_t>(raw[i+2]) : 0; };
+    auto u16 = [&](int i) -> uint16_t { return (uint16_t(u8(i)) << 8) | u8(i+1); };
+
+    // Log raw data for byte mapping analysis
+    QString hex;
+    for (int i = 2; i < n; i++)
+        hex += QString("%1 ").arg(static_cast<uint8_t>(raw[i]), 2, 16, QChar('0')).toUpper();
+    emit logMessage("TCM 0x30: " + hex.trimmed());
+
+    // Tentative byte mapping (will be refined with driving test data):
+    // Based on Mercedes 722.6 EGS52 typical block 0x30 structure
+    // and comparison with known idle values:
+    // [0-1] = 001A (26) - could be gear/status
+    // [2-3] = 001E (30) - could be temperature+40 offset (30-40=-10? or raw)
+    // [4-5] = 0000 - could be vehicle speed (0 at idle)
+    // [6-7] = 0008 (8) - 
+    // [8]   = 04 - could be selector position (P=4?)
+    // [9-10] = 00DD (221) - could be turbine RPM (~750/3.4?)
+    // [11]  = 61 - could be trans temp raw (97-40=57C?)
+    // [12-13] = FFF7 - signed? (-9)
+    // [14-15] = FFF7 - signed? (-9)
+    // [16-17] = 0000
+    // [18]  = 96 (150) - could be solenoid voltage * some factor
+    // [19]  = 18 (24)
+    // [20-21] = 0008
+
+    // For now expose raw bytes so dashboard can at least show something
+    // Byte 8 might be gear selector: P=4, R=3, N=2, D=1?
+    tcm.selectedGear = u8(8);
+
+    // Bytes 9-10 might be related to RPM
+    tcm.turbineRPM = u16(9);
+
+    // Byte 11 might be temperature
+    tcm.transTemp = u8(11) - 40;  // standard offset
+
+    // Bytes 4-5 might be vehicle speed
+    tcm.vehicleSpeed = u16(4);
+
+    // Bytes 0-1
+    tcm.actualGear = u8(0);
 }
 
 // readSingleParam - K-Line KWP2000 ReadLocalData tek blok oku
@@ -1184,15 +1207,15 @@ void WJDiagnostics::initLiveDataParams()
         {0x2D, "Wastegate Solenoid",          "%",     0, 100,  0.39,   0, 1, false},
         {0x30, "Calculated Gear",             "",      0,   7,  1.0,    0, 1, false},
         // ECU (0x15) parameters - localID 0xE0+ range (virtual IDs for ECU block data)
-        {0xE0, "Engine RPM",                  "rpm",   0, 6000, 1.0,    0, 2, false},
-        {0xE1, "Coolant Temp",                "C",   -40, 150,  1.0,    0, 2, false},
-        {0xE2, "Intake Air Temp",             "C",   -40, 100,  1.0,    0, 2, false},
-        {0xE3, "Throttle Position",           "%",     0, 100,  1.0,    0, 2, false},
-        {0xE4, "Boost Pressure",              "mbar",  0, 3000, 1.0,    0, 2, false},
-        {0xE5, "MAF Actual",                  "mg/s",  0, 2000, 1.0,    0, 2, false},
-        {0xE6, "Rail Pressure",               "bar",   0, 2000, 1.0,    0, 2, false},
-        {0xE7, "Injection Qty",               "mg",    0, 100,  1.0,    0, 2, false},
-        {0xE8, "Battery Voltage",             "V",     0,  20,  1.0,    0, 2, false},
+        {0xF0, "Engine RPM",                  "rpm",   0, 6000, 1.0,    0, 2, false},
+        {0xF1, "Coolant Temp",                "C",   -40, 150,  1.0,    0, 2, false},
+        {0xF2, "Intake Air Temp",             "C",   -40, 100,  1.0,    0, 2, false},
+        {0xF3, "Throttle Position",           "%",     0, 100,  1.0,    0, 2, false},
+        {0xF4, "Boost Pressure",              "mbar",  0, 3000, 1.0,    0, 2, false},
+        {0xF5, "MAF Actual",                  "mg/s",  0, 2000, 1.0,    0, 2, false},
+        {0xF6, "Rail Pressure",               "bar",   0, 2000, 1.0,    0, 2, false},
+        {0xF7, "Injection Qty",               "mg",    0, 100,  1.0,    0, 2, false},
+        {0xF8, "Battery Voltage",             "V",     0,  20,  1.0,    0, 2, false},
     };
     emit logMessage(QString("Live data: %1 parameters loaded").arg(m_liveParams.size()));
 }
