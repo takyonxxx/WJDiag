@@ -1161,7 +1161,8 @@ QString MainWindow::gearToString(TCMDiagnostics::Gear gear)
 
 
 
-// --- Raw Data Read - Test v10: ABS/Airbag DTC discovery + deep scan ---
+
+// --- Raw Data Read - Test v11: APK-informed correct SID per module ---
 void MainWindow::onRawBusDump()
 {
     m_rawDumpBtn->setEnabled(false);
@@ -1179,7 +1180,7 @@ void MainWindow::onRawBusDump()
         m_rawDumpBtn->setText("Raw Data Read");
     };
 
-    m_logText->append("<font color='white'>========== TEST v10 ==========</font>");
+    m_logText->append("<font color='white'>========== TEST v11 (APK-verified SIDs) ==========</font>");
     runDiscoveryPhases(log, done);
 }
 
@@ -1191,153 +1192,149 @@ void MainWindow::runDiscoveryPhases(
     auto steps = std::make_shared<QList<Step>>();
 
     // =================================================================
-    // PHASE 1: ABS (0x40) DTC FORMAT DISCOVERY
-    // Real: "26 40 62 43 00 00 DD" — what is 0x43?
+    // PHASE 1: BCM (0x80) SID 0x2E — 35+ PIDs from APK
     // =================================================================
-    steps->append(Step{"", "header:=== Phase 1: ABS (0x40) DTC Discovery ==="});
+    steps->append(Step{"", "header:=== Phase 1: BCM (0x80) SID 0x2E ==="});
     steps->append(Step{"", "switch:j1850"});
-    steps->append(Step{"ABS 24 00 00 (current)", "j1850cmd:24 00 00"});
-    steps->append(Step{"ABS 20 37 00 (Chrysler DTC)", "j1850cmd:20 37 00"});
-    steps->append(Step{"ABS 18 00 FF", "j1850cmd:18 00 FF"});
-    steps->append(Step{"ABS 18 02 FF", "j1850cmd:18 02 FF"});
-    steps->append(Step{"ABS 18 02 FF 00", "j1850cmd:18 02 FF 00"});
-    steps->append(Step{"ABS 19 02 FF (UDS)", "j1850cmd:19 02 FF"});
-    steps->append(Step{"ABS 24 01 00", "j1850cmd:24 01 00"});
-    steps->append(Step{"ABS 24 02 00", "j1850cmd:24 02 00"});
-    steps->append(Step{"ABS 24 37 00", "j1850cmd:24 37 00"});
-    steps->append(Step{"ABS 24 FF 00", "j1850cmd:24 FF 00"});
-    steps->append(Step{"ABS 22 00 00", "j1850cmd:22 00 00"});
-    steps->append(Step{"ABS 22 FF 00", "j1850cmd:22 FF 00"});
-    steps->append(Step{"ABS 10 01 (DiagSess)", "j1850cmd:10 01 00"});
-    steps->append(Step{"ABS 24 00 00 (after)", "j1850cmd:24 00 00"});
-    // Diag header mode
-    steps->append(Step{"", "j1850hdr:ATSH244010"});
-    steps->append(Step{"ABS hdr10 24 00", "j1850cmd:24 00 00"});
-    steps->append(Step{"ABS hdr10 18 02 FF", "j1850cmd:18 02 FF"});
-    steps->append(Step{"", "j1850hdr:ATSH244022"});
-    steps->append(Step{"", "j1850hdr:ATRA40"});
-    // Extra PIDs
-    steps->append(Step{"", "header:--- ABS Extra PIDs ---"});
-    steps->append(Step{"ABS PID 07", "j1850cmd:20 07 00"});
-    steps->append(Step{"ABS PID 08", "j1850cmd:20 08 00"});
-    steps->append(Step{"ABS PID 0B", "j1850cmd:20 0B 00"});
-    steps->append(Step{"ABS PID 0F", "j1850cmd:20 0F 00"});
-    steps->append(Step{"ABS PID 11", "j1850cmd:20 11 00"});
-    steps->append(Step{"ABS PID 20", "j1850cmd:20 20 00"});
-    steps->append(Step{"ABS PID 30", "j1850cmd:20 30 00"});
-    steps->append(Step{"ABS 1A 80", "j1850cmd:1A 80 00"});
-    steps->append(Step{"ABS 1A 86", "j1850cmd:1A 86 00"});
-    steps->append(Step{"ABS 1A 87", "j1850cmd:1A 87 00"});
+    steps->append(Step{"", "j1850hdr:ATSH248022"});
+    steps->append(Step{"", "j1850hdr:ATRA80"});
+    for (int pid : {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0D,
+                    0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
+                    0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
+                    0x30,0x50,0x51,0x52,0x53,0x54}) {
+        steps->append(Step{
+            QString("BCM 2E %1").arg(pid, 2, 16, QChar('0')).toUpper(),
+            QString("j1850cmd:2E %1 00").arg(pid, 2, 16, QChar('0')).toUpper()
+        });
+    }
+    steps->append(Step{"BCM 1A 87", "j1850cmd:1A 87 00"});
+    steps->append(Step{"BCM 24 00", "j1850cmd:24 00 00"});
 
     // =================================================================
-    // PHASE 2: AIRBAG (0x60) DTC DISCOVERY
-    // "28 37 00" -> NRC 0x12. Try everything.
+    // PHASE 2: Cluster (0x90) SID 0x32
     // =================================================================
-    steps->append(Step{"", "header:=== Phase 2: Airbag (0x60) DTC Discovery ==="});
+    steps->append(Step{"", "header:=== Phase 2: Cluster (0x90) SID 0x32 ==="});
+    steps->append(Step{"", "j1850hdr:ATSH249022"});
+    for (int pid : {0x00,0x01,0x02,0x03,0x04,0x05,
+                    0x10,0x11,0x13,0x14,0x15,0x16,0x17,0x18,
+                    0x21,0x25,0x26,0x27,0x28}) {
+        steps->append(Step{
+            QString("Cluster 32 %1").arg(pid, 2, 16, QChar('0')).toUpper(),
+            QString("j1850cmd:32 %1 00").arg(pid, 2, 16, QChar('0')).toUpper()
+        });
+    }
+    steps->append(Step{"Cluster 1A 87", "j1850cmd:1A 87 00"});
+
+    // =================================================================
+    // PHASE 3: Overhead Console (0x28) SID 0x2A
+    // =================================================================
+    steps->append(Step{"", "header:=== Phase 3: Overhead (0x28) SID 0x2A ==="});
+    steps->append(Step{"", "j1850hdr:ATSH242822"});
+    for (int pid : {0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x1F}) {
+        steps->append(Step{
+            QString("OHC 2A %1").arg(pid, 2, 16, QChar('0')).toUpper(),
+            QString("j1850cmd:2A %1 00").arg(pid, 2, 16, QChar('0')).toUpper()
+        });
+    }
+
+    // =================================================================
+    // PHASE 4: MemSeat (0x98) SID 0x38
+    // =================================================================
+    steps->append(Step{"", "header:=== Phase 4: MemSeat (0x98) SID 0x38 ==="});
+    steps->append(Step{"", "j1850hdr:ATSH249822"});
+    for (int pid : {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0F,0x10,0x18}) {
+        steps->append(Step{
+            QString("Seat 38 %1").arg(pid, 2, 16, QChar('0')).toUpper(),
+            QString("j1850cmd:38 %1 00").arg(pid, 2, 16, QChar('0')).toUpper()
+        });
+    }
+
+    // =================================================================
+    // PHASE 5: VTSS (0xC0) + Module 0xA1 + EVIC (0x2A) + Radio (0x87) + Liftgate (0xA0)
+    // =================================================================
+    steps->append(Step{"", "header:=== Phase 5: VTSS/0xA1/EVIC/Radio/Liftgate ==="});
+    // VTSS
+    steps->append(Step{"", "j1850hdr:ATSH24C022"});
+    steps->append(Step{"VTSS 2E 00", "j1850cmd:2E 00 00"});
+    steps->append(Step{"VTSS 20 00", "j1850cmd:20 00 00"});
+    steps->append(Step{"VTSS 38 00", "j1850cmd:38 00 00"});
+    steps->append(Step{"VTSS 1A 87", "j1850cmd:1A 87 00"});
+    // 0xA1
+    steps->append(Step{"", "j1850hdr:ATSH24A122"});
+    steps->append(Step{"0xA1 2E 00", "j1850cmd:2E 00 00"});
+    steps->append(Step{"0xA1 1A 87", "j1850cmd:1A 87 00"});
+    // EVIC
+    steps->append(Step{"", "j1850hdr:ATSH242A22"});
+    steps->append(Step{"EVIC 2A 03", "j1850cmd:2A 03 00"});
+    steps->append(Step{"EVIC 1A 87", "j1850cmd:1A 87 00"});
+    // Radio
+    steps->append(Step{"", "j1850hdr:ATSH248722"});
+    steps->append(Step{"Radio 2F 01", "j1850cmd:2F 01 00"});
+    steps->append(Step{"Radio 1A 87", "j1850cmd:1A 87 00"});
+    // Liftgate
+    steps->append(Step{"", "j1850hdr:ATSH24A022"});
+    steps->append(Step{"Liftgate 2E 00", "j1850cmd:2E 00 00"});
+    steps->append(Step{"Liftgate 1A 87", "j1850cmd:1A 87 00"});
+
+    // =================================================================
+    // PHASE 6: Airbag retry — 28 37 01 + security + routine modes
+    // =================================================================
+    steps->append(Step{"", "header:=== Phase 6: Airbag (0x60) APK Retry ==="});
     steps->append(Step{"", "j1850hdr:ATSH246022"});
     steps->append(Step{"", "j1850hdr:ATRA60"});
-    steps->append(Step{"Airbag 28 00 00", "j1850cmd:28 00 00"});
-    steps->append(Step{"Airbag 28 01 00", "j1850cmd:28 01 00"});
-    steps->append(Step{"Airbag 28 02 00", "j1850cmd:28 02 00"});
-    steps->append(Step{"Airbag 28 03 00", "j1850cmd:28 03 00"});
-    steps->append(Step{"Airbag 28 10 00", "j1850cmd:28 10 00"});
-    steps->append(Step{"Airbag 28 37 00", "j1850cmd:28 37 00"});
-    steps->append(Step{"Airbag 28 FF 00", "j1850cmd:28 FF 00"});
-    steps->append(Step{"Airbag 20 00 00", "j1850cmd:20 00 00"});
-    steps->append(Step{"Airbag 20 37 00", "j1850cmd:20 37 00"});
-    steps->append(Step{"Airbag 18 02 FF", "j1850cmd:18 02 FF"});
-    steps->append(Step{"Airbag 19 02 FF (UDS)", "j1850cmd:19 02 FF"});
-    steps->append(Step{"Airbag 22 00 00", "j1850cmd:22 00 00"});
-    steps->append(Step{"Airbag 24 00 00", "j1850cmd:24 00 00"});
-    steps->append(Step{"Airbag 10 01 (DiagSess)", "j1850cmd:10 01 00"});
-    steps->append(Step{"Airbag 28 37 (after)", "j1850cmd:28 37 00"});
-    steps->append(Step{"Airbag 28 00 (after)", "j1850cmd:28 00 00"});
-    // Diag header
-    steps->append(Step{"", "j1850hdr:ATSH246010"});
-    steps->append(Step{"Airbag hdr10 28 37", "j1850cmd:28 37 00"});
-    steps->append(Step{"Airbag hdr10 18 02 FF", "j1850cmd:18 02 FF"});
+    steps->append(Step{"Airbag 28 37 01 (NEW)", "j1850cmd:28 37 01"});
+    steps->append(Step{"Airbag 28 3F 00", "j1850cmd:28 3F 00"});
+    steps->append(Step{"Airbag 28 0D 00", "j1850cmd:28 0D 00"});
+    steps->append(Step{"Airbag 28 0D 01", "j1850cmd:28 0D 01"});
+    // Security mode header
+    steps->append(Step{"", "j1850hdr:ATSH246027"});
+    steps->append(Step{"AirSec 28 37 00", "j1850cmd:28 37 00"});
+    steps->append(Step{"AirSec 28 00 00", "j1850cmd:28 00 00"});
+    steps->append(Step{"AirSec 27 01 00", "j1850cmd:27 01 00"});
+    // Routine mode
+    steps->append(Step{"", "j1850hdr:ATSH246031"});
+    steps->append(Step{"AirRtn 31 25 00", "j1850cmd:31 25 00"});
+    steps->append(Step{"AirRtn 28 37 00", "j1850cmd:28 37 00"});
     steps->append(Step{"", "j1850hdr:ATSH246022"});
-    // ECU ID
-    steps->append(Step{"Airbag 1A 80", "j1850cmd:1A 80 00"});
-    steps->append(Step{"Airbag 1A 86", "j1850cmd:1A 86 00"});
-    steps->append(Step{"Airbag 1A 87", "j1850cmd:1A 87 00"});
 
     // =================================================================
-    // PHASE 3: HVAC (0x68) FULL PID SCAN
+    // PHASE 7: SKIM (0x62) SID 0x38/0x3A
     // =================================================================
-    steps->append(Step{"", "header:=== Phase 3: HVAC (0x68) Full PID Scan ==="});
-    steps->append(Step{"", "j1850hdr:ATSH246822"});
-    steps->append(Step{"", "j1850hdr:ATRA68"});
-    for (int pid = 0x04; pid <= 0x20; pid++)
-        steps->append(Step{QString("HVAC %1").arg(pid,2,16,QChar('0')).toUpper(),
-            QString("j1850cmd:28 %1 00").arg(pid,2,16,QChar('0')).toUpper()});
-    steps->append(Step{"HVAC 18 02 FF (DTC)", "j1850cmd:18 02 FF"});
-    steps->append(Step{"HVAC 1A 86", "j1850cmd:1A 86 00"});
-    steps->append(Step{"HVAC 1A 87", "j1850cmd:1A 87 00"});
-
-    // =================================================================
-    // PHASE 4: TCM BLOCK DEEP ANALYSIS
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 4: TCM (0x20) Deep Analysis ==="});
-    steps->append(Step{"", "switch:tcm"});
-    steps->append(Step{"TCM 0x30 (live)", "cmd:21 30"});
-    steps->append(Step{"TCM 0x31 (shift)", "cmd:21 31"});
-    steps->append(Step{"TCM 0x32", "cmd:21 32"});
-    steps->append(Step{"TCM 0x33", "cmd:21 33"});
-    steps->append(Step{"TCM 0x34", "cmd:21 34"});
-    steps->append(Step{"TCM 0x35", "cmd:21 35"});
-    steps->append(Step{"TCM 0x38", "cmd:21 38"});
-    steps->append(Step{"TCM 0x3F", "cmd:21 3F"});
-    steps->append(Step{"TCM 0x60", "cmd:21 60"});
-    steps->append(Step{"TCM 0x80", "cmd:21 80"});
-    steps->append(Step{"TCM 0xC0 (lookup)", "cmd:21 C0"});
-    steps->append(Step{"TCM 22 00 01", "cmd:22 00 01"});
-    steps->append(Step{"TCM 22 F1 00", "cmd:22 F1 00"});
-
-    // =================================================================
-    // PHASE 5: ECU UNKNOWN BLOCKS
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 5: ECU (0x15) Unknown Blocks ==="});
-    steps->append(Step{"", "switch:ecu"});
-    steps->append(Step{"ECU 0x12 (ref)", "cmd:21 12"});
-    steps->append(Step{"ECU 0x26 (sensors)", "cmd:21 26"});
-    steps->append(Step{"ECU 0x10 (idle)", "cmd:21 10"});
-    steps->append(Step{"ECU 0x14", "cmd:21 14"});
-    steps->append(Step{"ECU 0x2C", "cmd:21 2C"});
-    steps->append(Step{"ECU 0x2E", "cmd:21 2E"});
-    steps->append(Step{"ECU 0x32", "cmd:21 32"});
-    steps->append(Step{"ECU 0x34", "cmd:21 34"});
-    steps->append(Step{"ECU 0x38", "cmd:21 38"});
-    steps->append(Step{"ECU 0x42", "cmd:21 42"});
-    steps->append(Step{"ECU 0x44", "cmd:21 44"});
-    steps->append(Step{"ECU 0x48", "cmd:21 48"});
-    steps->append(Step{"ECU 22 00 01", "cmd:22 00 01"});
-    steps->append(Step{"ECU 22 F1 90", "cmd:22 F1 90"});
-    steps->append(Step{"Battery", "cmd:ATRV"});
-
-    // =================================================================
-    // PHASE 6: ECU SECURITY (4 attempts)
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 6: ECU Security ==="});
-    steps->append(Step{"", "switch:ecu_sectest"});
-
-    // =================================================================
-    // PHASE 7: SKIM + FUNCTIONAL ADDRESSING
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 7: SKIM + Functional ==="});
-    steps->append(Step{"", "switch:j1850"});
+    steps->append(Step{"", "header:=== Phase 7: SKIM (0x62) SID 0x38/0x3A ==="});
     steps->append(Step{"", "j1850hdr:ATSH246222"});
-    steps->append(Step{"", "j1850hdr:ATRA62"});
-    steps->append(Step{"SKIM 22 00 00", "j1850cmd:22 00 00"});
-    steps->append(Step{"SKIM 1A 87 (retry)", "j1850cmd:1A 87 00"});
-    steps->append(Step{"SKIM 1A 86", "j1850cmd:1A 86 00"});
-    steps->append(Step{"SKIM 10 01", "j1850cmd:10 01 00"});
-    steps->append(Step{"SKIM 20 00 00", "j1850cmd:20 00 00"});
-    // Functional addressing
-    steps->append(Step{"", "header:--- Functional Addressing ---"});
-    steps->append(Step{"", "j1850hdr:ATSH24FF22"});
-    steps->append(Step{"Func 1A 87", "j1850cmd:1A 87 00"});
-    steps->append(Step{"Func 18 02 FF", "j1850cmd:18 02 FF"});
+    steps->append(Step{"SKIM 38 00 01", "j1850cmd:38 00 01"});
+    steps->append(Step{"SKIM 38 01 00", "j1850cmd:38 01 00"});
+    steps->append(Step{"SKIM 38 18 00", "j1850cmd:38 18 00"});
+    steps->append(Step{"SKIM 3A 00 01", "j1850cmd:3A 00 01"});
+    steps->append(Step{"SKIM 3A 01 01", "j1850cmd:3A 01 01"});
+
+    // =================================================================
+    // PHASE 8: HVAC (0x68) PID 04-20
+    // =================================================================
+    steps->append(Step{"", "header:=== Phase 8: HVAC PID 04-20 ==="});
+    steps->append(Step{"", "j1850hdr:ATSH246822"});
+    for (int pid = 0x04; pid <= 0x20; pid++) {
+        steps->append(Step{
+            QString("HVAC %1").arg(pid, 2, 16, QChar('0')).toUpper(),
+            QString("j1850cmd:28 %1 00").arg(pid, 2, 16, QChar('0')).toUpper()
+        });
+    }
+
+    // =================================================================
+    // PHASE 9: TCM 0x33-0x3E scan
+    // =================================================================
+    steps->append(Step{"", "header:=== Phase 9: TCM 0x33-0x3E ==="});
+    steps->append(Step{"", "switch:tcm"});
+    steps->append(Step{"TCM 0x30 ref", "cmd:21 30"});
+    for (int b = 0x33; b <= 0x3E; b++) {
+        steps->append(Step{
+            QString("TCM 0x%1").arg(b, 2, 16, QChar('0')).toUpper(),
+            QString("cmd:21 %1").arg(b, 2, 16, QChar('0')).toUpper()
+        });
+    }
+
+    // ECU security removed — constants for Chrysler OM612 EDC15 unknown
+    // APK has same constants we tried, also likely fails on this ECU
 
     // Final
     steps->append(Step{"", "header:--- Final ---"});
@@ -1351,7 +1348,7 @@ void MainWindow::runDiscoveryPhases(
 
     *run = [this, steps, idx, run, log, done]() {
         if (*idx >= steps->size()) {
-            m_logText->append("<font color='white'>========== TEST v10 BITTI ==========</font>");
+            m_logText->append("<font color='white'>========== TEST v11 BITTI ==========</font>");
             log("#ffff00", "COPY LOG ile kopyala!");
             done();
             return;
@@ -1375,97 +1372,15 @@ void MainWindow::runDiscoveryPhases(
                 (*run)();
             }); return;
         }
-        if (step.action == "switch:ecu_sectest") {
-            struct SecAttempt {
-                const char* label; QString seedCmd; uint8_t keyLevel; bool twoByteKey;
-                uint32_t xor1, xor2, magic;
-            };
-            auto attempts = std::make_shared<QVector<SecAttempt>>(QVector<SecAttempt>{
-                {"EDC16",    "27 01", 0x02, true, 0x1289, 0x0A22, 0x1C60020},
-                {"EDC15P",   "27 01", 0x02, true, 0xDA1C, 0xF781, 0x3800000},
-                {"EDC15V",   "27 01", 0x02, true, 0x508D, 0xA647, 0x3800000},
-                {"EDC15VM+", "27 01", 0x02, true, 0xF25E, 0x6533, 0x3800000},
-            });
-            auto aIdx = std::make_shared<int>(0);
-            auto tryA = std::make_shared<std::function<void()>>();
-            auto readProt = [this, log, run]() {
-                m_elm->sendCommand("21 62", [this, log, run](const QString &r) {
-                log("#00ff88", "ECU 0x62: " + r.trimmed());
-                m_elm->sendCommand("21 B0", [this, log, run](const QString &r) {
-                log("#00ff88", "ECU 0xB0: " + r.trimmed());
-                m_elm->sendCommand("21 B1", [this, log, run](const QString &r) {
-                log("#00ff88", "ECU 0xB1: " + r.trimmed());
-                m_elm->sendCommand("21 B2", [this, log, run](const QString &r) {
-                log("#00ff88", "ECU 0xB2: " + r.trimmed());
-                m_elm->sendCommand("1A 90", [this, log, run](const QString &r) {
-                log("#00ff88", "ECU VIN: " + r.trimmed());
-                (*run)();
-                });});});});});
-            };
-            *tryA = [this, attempts, aIdx, tryA, log, run, readProt]() {
-                if (*aIdx >= attempts->size()) {
-                    log("#ff8800", "ECU security: all exhausted");
-                    (*run)(); return;
-                }
-                auto &a = attempts->at(*aIdx);
-                log("#c0c0ff", QString("[%1/%2] %3").arg(*aIdx+1).arg(attempts->size()).arg(a.label));
-                m_elm->sendCommand("ATZ", [this, attempts, aIdx, tryA, log, run, a, readProt](const QString &) {
-                QTimer::singleShot(500, this, [this, attempts, aIdx, tryA, log, run, a, readProt]() {
-                m_elm->sendCommand("ATE1", [this, attempts, aIdx, tryA, log, run, a, readProt](const QString &) {
-                m_elm->sendCommand("ATH1", [this, attempts, aIdx, tryA, log, run, a, readProt](const QString &) {
-                m_elm->sendCommand("ATWM8115F13E", [this, attempts, aIdx, tryA, log, run, a, readProt](const QString &) {
-                m_elm->sendCommand("ATSH8115F1", [this, attempts, aIdx, tryA, log, run, a, readProt](const QString &) {
-                m_elm->sendCommand("ATSP5", [this, attempts, aIdx, tryA, log, run, a, readProt](const QString &) {
-                m_elm->sendCommand("ATFI", [this, attempts, aIdx, tryA, log, run, a, readProt](const QString &fi) {
-                    if (fi.contains("ERROR") || (!fi.contains("OK") && !fi.contains("BUS INIT"))) {
-                        (*aIdx)++; QTimer::singleShot(2000, this, [tryA](){ (*tryA)(); }); return;
-                    }
-                m_elm->sendCommand("81", [this, attempts, aIdx, tryA, log, run, a, readProt](const QString &) {
-                m_elm->sendCommand(a.seedCmd, [this, attempts, aIdx, tryA, log, run, a, readProt](const QString &sr) {
-                    QStringList p = sr.trimmed().split(' ');
-                    int si = -1;
-                    for (int i = 0; i < p.size(); i++) if (p[i].compare("67",Qt::CaseInsensitive)==0) { si=i; break; }
-                    if (si >= 0 && si+3 < p.size()) {
-                        bool o1,o2;
-                        uint8_t s0=p[si+2].toUInt(&o1,16), s1=p[si+3].toUInt(&o2,16);
-                        if (o1&&o2) {
-                            log("#c080ff", QString("Seed: %1 %2").arg(s0,2,16,QChar('0')).arg(s1,2,16,QChar('0')));
-                            uint32_t KR1=(s0<<8)|s1, KR2=0, K3=a.magic;
-                            for (int i=0;i<5;i++) {
-                                uint32_t KT=KR1&0x8000; KR1=(KR1<<1)&0xFFFFFFFF;
-                                if ((KT&0xFFFF)==0) { uint32_t t2=KR2&0xFFFF; KT=t2+(KT&0xFFFF0000); KR1&=0xFFFE; t2=(KT&0xFFFF)>>15; KT=(KT&0xFFFF0000)+t2; KR1|=KT; KR2=(KR2<<1)&0xFFFFFFFF; }
-                                else { KT=(KR2+KR2)&0xFFFFFFFF; KR1&=0xFFFE; uint32_t t2=(KT&0xFF)|1; K3=(t2+(K3&0xFFFFFF00))&0xFFFFFFFF; K3=(K3&0xFFFF00FF)|KT; t2=(KR2&0xFFFF)>>15; KT=(t2+(KT&0xFFFF0000))|KR1; K3=(K3^a.xor1)&0xFFFFFFFF; KT=(KT^a.xor2)&0xFFFFFFFF; KR2=K3; KR1=KT; }
-                            }
-                            KR1&=0xFFFF;
-                            QString kc=QString("27 02 %1 %2").arg((KR1>>8)&0xFF,2,16,QChar('0')).arg(KR1&0xFF,2,16,QChar('0')).toUpper();
-                            log("#c080ff", "Key: " + kc);
-                            m_elm->sendCommand(kc, [this, attempts, aIdx, tryA, log, run, readProt](const QString &kr) {
-                                if (kr.contains("67",Qt::CaseInsensitive) && !kr.contains("7F",Qt::CaseInsensitive)) {
-                                    log("#00ff00", QString("*** UNLOCKED: %1 ***").arg(attempts->at(*aIdx).label));
-                                    readProt(); return;
-                                }
-                                QString nrc; QStringList rp=kr.trimmed().split(' ');
-                                for (int i=0;i<rp.size()-1;i++) if (rp[i].compare("7F",Qt::CaseInsensitive)==0&&i+2<rp.size()) nrc=rp[i+2];
-                                log("#ff8800", QString("%1 -> NRC 0x%2").arg(attempts->at(*aIdx).label,nrc));
-                                (*aIdx)++; QTimer::singleShot(nrc=="37"?10000:2000, this, [tryA](){ (*tryA)(); });
-                            });
-                        } else { (*aIdx)++; QTimer::singleShot(1000, this, [tryA](){ (*tryA)(); }); }
-                    } else { log("#ff8800","No seed: "+sr.trimmed()); (*aIdx)++; QTimer::singleShot(1000, this, [tryA](){ (*tryA)(); }); }
-                });});});});});});});});});});
-            };
-            (*tryA)(); return;
-        }
         if (step.action == "switch:j1850") {
             m_elm->sendCommand("ATZ", [this, log, run](const QString &) {
             m_elm->sendCommand("ATE1", [this, log, run](const QString &) {
             m_elm->sendCommand("ATH1", [this, log, run](const QString &) {
             m_elm->sendCommand("ATIFR0", [this, log, run](const QString &) {
             m_elm->sendCommand("ATSP2", [this, log, run](const QString &) {
-            m_elm->sendCommand("ATSH244022", [this, log, run](const QString &) {
-            m_elm->sendCommand("ATRA40", [this, log, run](const QString &) {
                 log("#60b8a0", "J1850 VPW ready");
                 (*run)();
-            });});});});});});});
+            });});});});});
             return;
         }
         if (step.action.startsWith("j1850hdr:")) {
