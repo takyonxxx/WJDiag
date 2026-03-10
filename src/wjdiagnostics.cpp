@@ -1184,8 +1184,19 @@ void WJDiagnostics::parseTCMBlock30(const QByteArray &raw, TCMStatus &tcm)
     // Trans Temp
     tcm.transTemp = u8(11) - 40;
 
+    // Line pressure (signed, byte 9-10)
+    int16_t rawLP = static_cast<int16_t>(u16(9));
+    tcm.linePressure = rawLP;
+
+    // TCC Slip actual (signed, byte 12-13)
+    int16_t rawSlipA = static_cast<int16_t>(u16(12));
+    tcm.actualTCCslip = rawSlipA;
+
+    // TCC Slip desired (signed, byte 14-15)
+    int16_t rawSlipD = static_cast<int16_t>(u16(14));
+    tcm.desTCCslip = rawSlipD;
+
     // Solenoid supply: NOT available in block 0x30
-    // byte[9-10] is line pressure, not voltage
     // byte[18] is mode bitmask, not voltage
     tcm.solenoidSupply = 0;  // unknown from this block
 
