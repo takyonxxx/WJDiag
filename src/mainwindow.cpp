@@ -413,8 +413,7 @@ QWidget* MainWindow::createConnectionTab()
 
     // WiFi row
     connGrid->addWidget(new QLabel("WiFi:"), 0, 0);
-    // m_hostEdit = new QLineEdit("192.168.0.10");
-    m_hostEdit = new QLineEdit("192.168.1.5");
+    m_hostEdit = new QLineEdit("192.168.0.10");
     connGrid->addWidget(m_hostEdit, 0, 1);
     m_portSpin = new QSpinBox();
     m_portSpin->setRange(1, 65535);
