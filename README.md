@@ -23,11 +23,43 @@ Qt6 C++ mobile diagnostic application for the Jeep Grand Cherokee WJ (2001-2004)
 
 | Module | Address | SID | Status |
 |--------|---------|-----|--------|
-| ABS / ESP | 0x40 | 0x20/0x24 | DTC read/clear |
-| Airbag (ORC) | 0x60 | 0x28 | NRC 0x22 (conditions not met) |
-| HVAC | 0x68 | 0x28 | PIDs 0x00-0x03 confirmed |
+| ABS / ESP | 0x40 | 0x20/0x24 | DTC read/clear, live PIDs |
+| Airbag (ORC) | 0x60 | 0x28 | NRC 0x22 on SID 0x22; try mode 0xA0/0xA3 |
+| HVAC | 0x68 | 0x28 | PIDs 0x00-0x03 confirmed; try modes 0x31/0x33 |
 
-Note: BCM (0x80), Cluster (0x90), MemSeat (0x98), SKIM (0x62), Overhead Console (0x28), VTSS (0xC0), Radio (0x87), Liftgate (0xA0) all return NO DATA on our test vehicle — these modules may not be equipped on the EU-spec 2.7 CRD.
+Note: BCM (0x80), Cluster (0x90), MemSeat (0x98), SKIM (0x62), Overhead Console (0x28), VTSS (0xC0), Radio (0x87), Liftgate (0xA0) currently return NO DATA on our test vehicle (engine running, BLE ELM327 adapter). These modules are confirmed present and accessible via other diagnostic tools. Investigation ongoing.
+
+### J1850 VPW Header Format
+
+The J1850 VPW header byte structure is `ATSH 24 XX YY` where:
+- `24` = priority byte (J1850 VPW standard)
+- `XX` = target module address
+- `YY` = mode byte (determines which service the module responds to)
+
+Known mode bytes per module (discovered through reverse engineering):
+
+| Module | Addr | Read(22) | Func(10) | Clear(11) | Sec(27) | Rtn(31) | Rtn2(33) | Alt(A0) | Alt2(A3) | DL(14) | DL2(20) | IO(30) | Spe(B4) |
+|--------|------|----------|----------|-----------|---------|---------|----------|---------|----------|--------|---------|--------|---------|
+| OHC | 0x28 | 22 | 10 | 11 | - | - | - | A0 | A3 | 14 | 20 | 30 | - |
+| ABS | 0x40 | 22 | - | 11 | - | - | - | A0 | - | - | - | - | - |
+| Airbag | 0x60 | 22 | - | 11 | 27 | 31 | - | A0 | A3 | - | - | - | - |
+| SKIM | 0x62 | 22 | - | - | - | - | - | - | - | - | - | - | - |
+| HVAC | 0x68 | 22 | - | 11 | - | 31 | 33 | - | - | - | - | - | - |
+| BCM | 0x80 | 22 | 10 | 11 | - | - | - | - | - | - | 20 | - | - |
+| Radio | 0x87 | 22 | - | - | - | - | - | - | - | - | - | - | - |
+| Cluster | 0x90 | 22 | 10 | - | - | - | - | - | - | - | - | - | - |
+| MemSeat | 0x98 | 22 | - | - | - | - | - | - | - | - | - | - | - |
+| Liftgate| 0xA0 | 22 | - | - | - | - | - | - | - | - | - | - | - |
+| 0xA1 | 0xA1 | 22 | - | - | - | 31 | 33 | - | - | - | - | - | - |
+| VTSS | 0xC0 | 22 | - | - | 27 | - | - | - | - | - | - | - | B4 |
+
+All testing was performed with engine running. The `ATRA` receive filter command is required for each module (`ATRAXX` where XX is the module address).
+
+### Possible causes for NO DATA on some modules
+
+1. **EU-spec WJ 2.7 CRD may not have all US-spec J1850 modules** — the PCI/CCD bus architecture differs between markets
+2. **BLE ELM327 adapter timing** — some modules may need longer response timeout than the BLE adapter provides
+3. **Mode byte mismatch** — some modules only respond on specific mode bytes (e.g., Overhead Console primarily uses mode 0xA0, not 0x22)
 
 ## ECU Security Access
 

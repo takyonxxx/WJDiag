@@ -21,6 +21,7 @@
 #include <QDir>
 #include <QFrame>
 #include <QPointer>
+#include <QRegularExpression>
 
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
@@ -166,7 +167,9 @@ void MainWindow::setupUI()
 
 
 // ================================================================
-// Dashboard - 11 gauge responsive grid
+// Dashboard - module-dependent gauge layout
+// TCM: big gear + surrounding TCM gauges
+// ECU: engine-specific gauges (no TCM)
 // ================================================================
 
 QFrame* MainWindow::createGaugeCard(const QString &title, const QString &initValue,
@@ -197,78 +200,204 @@ QFrame* MainWindow::createGaugeCard(const QString &title, const QString &initVal
 
 QWidget* MainWindow::createDashboardPanel()
 {
-    QWidget *p = new QWidget();
-    QGridLayout *g = new QGridLayout(p);
+    m_dashStack = new QWidget();
+    m_dashLayout = new QVBoxLayout(m_dashStack);
+    m_dashLayout->setContentsMargins(0,0,0,0);
+    m_dashLayout->setSpacing(0);
+    rebuildDashboard();
+    return m_dashStack;
+}
+
+void MainWindow::rebuildDashboard()
+{
+    // Clear old dashboard
+    QLayoutItem *item;
+    while ((item = m_dashLayout->takeAt(0)) != nullptr) {
+        if (item->widget()) { item->widget()->deleteLater(); }
+        delete item;
+    }
+
+    // Null all gauge pointers
+    m_dashGearVal=m_dashGearUnit=nullptr;
+    m_dashSpeedVal=m_dashSpeedUnit=nullptr;
+    m_dashRpmVal=m_dashRpmUnit=nullptr;
+    m_dashCoolantVal=m_dashCoolantUnit=nullptr;
+    m_dashSolVoltVal=m_dashSolVoltUnit=nullptr;
+    m_dashBatVoltVal=m_dashBatVoltUnit=nullptr;
+    m_dashMotCoolVal=m_dashMotCoolUnit=nullptr;
+    m_dashLimpVal=m_dashLimpUnit=nullptr;
+    m_dashMotRpmVal=m_dashMotRpmUnit=nullptr;
+    m_dashMotBoostVal=m_dashMotBoostUnit=nullptr;
+    m_dashMotMafVal=m_dashMotMafUnit=nullptr;
+    m_dashMotRailVal=m_dashMotRailUnit=nullptr;
+    m_dashEgrVal=m_dashEgrUnit=nullptr;
+    m_dashWgVal=m_dashWgUnit=nullptr;
+    m_dashInjAdaptVal=m_dashInjAdaptUnit=nullptr;
+    m_dashFuelAdaptVal=m_dashFuelAdaptUnit=nullptr;
+    m_dashBoostAdaptVal=m_dashBoostAdaptUnit=nullptr;
+    m_dashOilPressVal=m_dashOilPressUnit=nullptr;
+
+    bool isTCM = (m_moduleSessionActive && m_activeModId == WJDiagnostics::Module::KLineTCM);
+    bool isECU = (m_moduleSessionActive && m_activeModId == WJDiagnostics::Module::MotorECU);
+
+    QWidget *panel = new QWidget();
+    QGridLayout *g = new QGridLayout(panel);
     g->setContentsMargins(2,2,2,2);
     g->setSpacing(3);
 
-    // --- SATIR 0: ANA SÜRÜŞ GÖSTERGELERİ ---
-    // En kritik veriler en üstte
-    g->addWidget(createGaugeCard("SPEED", "---", "km/h", &m_dashSpeedVal, &m_dashSpeedUnit), 0, 0);
-    g->addWidget(createGaugeCard("GEAR",  "---", "",     &m_dashGearVal,  &m_dashGearUnit),  0, 1);
-    g->addWidget(createGaugeCard("RPM",   "---", "rpm",  &m_dashMotRpmVal, &m_dashMotRpmUnit), 0, 2);
-    g->addWidget(createGaugeCard("TURBIN","---", "rpm",  &m_dashRpmVal,    &m_dashRpmUnit),    0, 3);
+    if (isTCM) {
+        // === TCM DASHBOARD: Big gear center, surrounding gauges ===
+        // Row 0: Speed | GEAR(2x2) | Turbine RPM
+        g->addWidget(createGaugeCard("SPEED", "---", "km/h", &m_dashSpeedVal, &m_dashSpeedUnit), 0, 0);
 
-    // --- SATIR 1: MOTOR PERFORMANS (ECU) ---
-    // Hava ve yakıt verileri yan yana
-    g->addWidget(createGaugeCard("BOOST", "---", "mbar", &m_dashMotBoostVal, &m_dashMotBoostUnit), 1, 0);
-    g->addWidget(createGaugeCard("MAF",   "---", "mg/s", &m_dashMotMafVal,   &m_dashMotMafUnit),   1, 1);
-    g->addWidget(createGaugeCard("RAIL",  "---", "bar",  &m_dashMotRailVal,  &m_dashMotRailUnit),  1, 2);
-    g->addWidget(createGaugeCard("LIMP",  "---", "",     &m_dashLimpVal,     &m_dashLimpUnit),     1, 3);
+        // Big gear display (spans 2 rows, 2 cols)
+        QFrame *gearCard = new QFrame();
+        gearCard->setFrameShape(QFrame::StyledPanel);
+        gearCard->setStyleSheet("QFrame{background:#0a1420;border:2px solid #00806a;border-radius:10px;}");
+        QVBoxLayout *gl = new QVBoxLayout(gearCard);
+        gl->setContentsMargins(4,2,4,2); gl->setSpacing(0);
+        QLabel *gt = new QLabel("GEAR");
+        gt->setAlignment(Qt::AlignCenter);
+        gt->setStyleSheet("color:#5888a8;font-size:12px;border:none;background:transparent;");
+        gl->addWidget(gt);
+        m_dashGearVal = new QLabel("---");
+        m_dashGearVal->setAlignment(Qt::AlignCenter);
+        m_dashGearVal->setStyleSheet("color:#00ffa0;font-size:72px;font-weight:bold;"
+            "font-family:'Consolas','Courier New',monospace;border:none;background:transparent;");
+        gl->addWidget(m_dashGearVal);
+        m_dashGearUnit = new QLabel("");
+        m_dashGearUnit->setAlignment(Qt::AlignCenter);
+        m_dashGearUnit->setStyleSheet("color:#406888;font-size:10px;border:none;background:transparent;");
+        gl->addWidget(m_dashGearUnit);
+        g->addWidget(gearCard, 0, 1, 2, 2);
 
-    // --- SATIR 2: SİSTEM SAĞLIĞI & VOLTAJ ---
-    // Sıcaklıklar ve elektrik durumu
-    g->addWidget(createGaugeCard("M-TEMP","---", "C",    &m_dashMotCoolVal,  &m_dashMotCoolUnit), 2, 0); // Motor Su
-    g->addWidget(createGaugeCard("T-TEMP","---", "C",    &m_dashCoolantVal,  &m_dashCoolantUnit),     2, 1); // Trans Yağ
-    g->addWidget(createGaugeCard("BATT",  "---", "V",    &m_dashBatVoltVal,  &m_dashBatVoltUnit),     2, 2);
-    g->addWidget(createGaugeCard("SOL V", "---", "V",    &m_dashSolVoltVal,  &m_dashSolVoltUnit),     2, 3);
+        g->addWidget(createGaugeCard("TURBIN", "---", "rpm", &m_dashRpmVal, &m_dashRpmUnit), 0, 3);
 
-    for(int c=0; c<4; ++c) g->setColumnStretch(c, 1);
-    return p;
+        // Row 1: T-Temp | (gear spans) | Limp
+        g->addWidget(createGaugeCard("T-TEMP", "---", "C", &m_dashCoolantVal, &m_dashCoolantUnit), 1, 0);
+        g->addWidget(createGaugeCard("LIMP", "---", "", &m_dashLimpVal, &m_dashLimpUnit), 1, 3);
+
+        // Row 2: LinePr | TCC-Slip | Sol-V | Batt
+        g->addWidget(createGaugeCard("LINE-P", "---", "mbar", &m_dashMotBoostVal, &m_dashMotBoostUnit), 2, 0);
+        g->addWidget(createGaugeCard("TCC", "---", "rpm", &m_dashMotMafVal, &m_dashMotMafUnit), 2, 1);
+        g->addWidget(createGaugeCard("SOL V", "---", "V", &m_dashSolVoltVal, &m_dashSolVoltUnit), 2, 2);
+        g->addWidget(createGaugeCard("BATT", "---", "V", &m_dashBatVoltVal, &m_dashBatVoltUnit), 2, 3);
+
+        for(int c=0; c<4; ++c) g->setColumnStretch(c, 1);
+
+    } else if (isECU) {
+        // === ECU DASHBOARD: Engine-only gauges ===
+        // Row 0: RPM | Boost | MAF | Rail
+        g->addWidget(createGaugeCard("RPM", "---", "rpm", &m_dashMotRpmVal, &m_dashMotRpmUnit), 0, 0);
+        g->addWidget(createGaugeCard("BOOST", "---", "mbar", &m_dashMotBoostVal, &m_dashMotBoostUnit), 0, 1);
+        g->addWidget(createGaugeCard("MAF", "---", "mg/s", &m_dashMotMafVal, &m_dashMotMafUnit), 0, 2);
+        g->addWidget(createGaugeCard("RAIL", "---", "bar", &m_dashMotRailVal, &m_dashMotRailUnit), 0, 3);
+
+        // Row 1: M-Temp | IAT | TPS | INJ-Q
+        g->addWidget(createGaugeCard("M-TEMP", "---", "C", &m_dashMotCoolVal, &m_dashMotCoolUnit), 1, 0);
+        g->addWidget(createGaugeCard("IAT", "---", "C", &m_dashCoolantVal, &m_dashCoolantUnit), 1, 1);
+        g->addWidget(createGaugeCard("TPS", "---", "%", &m_dashLimpVal, &m_dashLimpUnit), 1, 2);
+        g->addWidget(createGaugeCard("INJ-Q", "---", "mg", &m_dashSpeedVal, &m_dashSpeedUnit), 1, 3);
+
+        // Row 2: Protected data gauges (EGR, Wastegate, Fuel Adapt, Batt)
+        g->addWidget(createGaugeCard("EGR", "---", "%", &m_dashEgrVal, &m_dashEgrUnit), 2, 0);
+        g->addWidget(createGaugeCard("WG", "---", "%", &m_dashWgVal, &m_dashWgUnit), 2, 1);
+        g->addWidget(createGaugeCard("FUEL-A", "---", "mg", &m_dashFuelAdaptVal, &m_dashFuelAdaptUnit), 2, 2);
+        g->addWidget(createGaugeCard("BATT", "---", "V", &m_dashBatVoltVal, &m_dashBatVoltUnit), 2, 3);
+
+        for(int c=0; c<4; ++c) g->setColumnStretch(c, 1);
+
+    } else {
+        // === DEFAULT: Mixed dashboard (no module active) ===
+        g->addWidget(createGaugeCard("SPEED", "---", "km/h", &m_dashSpeedVal, &m_dashSpeedUnit), 0, 0);
+        g->addWidget(createGaugeCard("GEAR", "---", "", &m_dashGearVal, &m_dashGearUnit), 0, 1);
+        g->addWidget(createGaugeCard("RPM", "---", "rpm", &m_dashMotRpmVal, &m_dashMotRpmUnit), 0, 2);
+        g->addWidget(createGaugeCard("TURBIN", "---", "rpm", &m_dashRpmVal, &m_dashRpmUnit), 0, 3);
+
+        g->addWidget(createGaugeCard("BOOST", "---", "mbar", &m_dashMotBoostVal, &m_dashMotBoostUnit), 1, 0);
+        g->addWidget(createGaugeCard("MAF", "---", "mg/s", &m_dashMotMafVal, &m_dashMotMafUnit), 1, 1);
+        g->addWidget(createGaugeCard("RAIL", "---", "bar", &m_dashMotRailVal, &m_dashMotRailUnit), 1, 2);
+        g->addWidget(createGaugeCard("LIMP", "---", "", &m_dashLimpVal, &m_dashLimpUnit), 1, 3);
+
+        g->addWidget(createGaugeCard("M-TEMP", "---", "C", &m_dashMotCoolVal, &m_dashMotCoolUnit), 2, 0);
+        g->addWidget(createGaugeCard("T-TEMP", "---", "C", &m_dashCoolantVal, &m_dashCoolantUnit), 2, 1);
+        g->addWidget(createGaugeCard("BATT", "---", "V", &m_dashBatVoltVal, &m_dashBatVoltUnit), 2, 2);
+        g->addWidget(createGaugeCard("SOL V", "---", "V", &m_dashSolVoltVal, &m_dashSolVoltUnit), 2, 3);
+
+        for(int c=0; c<4; ++c) g->setColumnStretch(c, 1);
+    }
+
+    m_dashLayout->addWidget(panel);
 }
 
 void MainWindow::setGaugeColor(QLabel *vl, const QString &c) {
-    vl->setStyleSheet(QString("color:%1;font-size:20px;font-weight:bold;"
-        "font-family:'Consolas','Courier New',monospace;border:none;background:transparent;").arg(c));
+    if (!vl) return;
+    // Only change color, preserve existing font size/weight
+    QPalette pal = vl->palette();
+    pal.setColor(QPalette::WindowText, QColor(c));
+    vl->setPalette(pal);
+    // Stylesheet approach: extract current font-size from stylesheet, only change color
+    QString ss = vl->styleSheet();
+    // Replace color value in existing stylesheet
+    static QRegularExpression colorRx("color:#[0-9a-fA-F]{6}");
+    if (ss.contains(colorRx)) {
+        ss.replace(colorRx, QString("color:%1").arg(c));
+    } else {
+        ss.prepend(QString("color:%1;").arg(c));
+    }
+    vl->setStyleSheet(ss);
 }
 
 void MainWindow::updateDashboardFromLiveData(const QMap<uint8_t, double> &v)
 {
-    // TCM J1850 VPW PIDs (APK referansi)
-    if(v.contains(0x01)){
+    // Null-safe macro: only update if label exists
+    #define DASH_SET(label, text) if(label) label->setText(text)
+    #define DASH_COLOR(label, color) if(label) setGaugeColor(label, color)
+
+    // TCM data
+    if(v.contains(0x01) && m_dashGearVal){
         int g=(int)v[0x01];
-        m_dashGearVal->setText(gearToString((TCMDiagnostics::Gear)g));
-        setGaugeColor(m_dashGearVal, g>=3 ? "#00d4b4" : "#d0a040");
+        DASH_SET(m_dashGearVal, gearToString((TCMDiagnostics::Gear)g));
+        DASH_COLOR(m_dashGearVal, g>=3 ? "#00ffa0" : "#d0a040");
     }
-    if(v.contains(0x20)) m_dashSpeedVal->setText(QString::number(v[0x20],'f',0));       // Vehicle Speed
-    if(v.contains(0x10)) m_dashRpmVal->setText(QString::number(v[0x10],'f',0));          // Turbine RPM
-    if(v.contains(0x16)){                                                                 // Solenoid Supply
+    if(v.contains(0x20)) DASH_SET(m_dashSpeedVal, QString::number(v[0x20],'f',0));
+    if(v.contains(0x10)) DASH_SET(m_dashRpmVal, QString::number(v[0x10],'f',0));
+    if(v.contains(0x16) && m_dashSolVoltVal){
         double sv=v[0x16];
-        m_dashSolVoltVal->setText(QString::number(sv,'f',1));
-        setGaugeColor(m_dashSolVoltVal, sv<9.0?"#e04040":sv<11.0?"#d09030":"#00d4b4");
+        DASH_SET(m_dashSolVoltVal, QString::number(sv,'f',1));
+        DASH_COLOR(m_dashSolVoltVal, sv<9.0?"#e04040":sv<11.0?"#d09030":"#00d4b4");
     }
-    // Limp mode: max gear <= 2 ise limp
-    if(v.contains(0x03)){
-        bool l = v[0x03] <= 2 && v.value(0x14, 0) > 100;
-        m_dashLimpVal->setText(l?"ACTIVE!":"Normal");
-        setGaugeColor(m_dashLimpVal, l?"#e04040":"#00d4b4");
+    if(v.contains(0x03) && m_dashLimpVal){
+        bool isTCM = (m_activeModId == WJDiagnostics::Module::KLineTCM);
+        if (isTCM) {
+            bool l = v[0x03] <= 2 && v.value(0x14, 0) > 100;
+            DASH_SET(m_dashLimpVal, l?"ACTIVE!":"Normal");
+            DASH_COLOR(m_dashLimpVal, l?"#e04040":"#00d4b4");
+        }
     }
-    // Trans temp
-    if(v.contains(0x14)){
+    if(v.contains(0x14) && m_dashCoolantVal){
         double ct=v[0x14];
-        m_dashCoolantVal->setText(QString::number(ct,'f',0));
-        setGaugeColor(m_dashCoolantVal, ct>105?"#e04040":ct>95?"#d09030":"#00d4b4");
+        DASH_SET(m_dashCoolantVal, QString::number(ct,'f',0));
+        DASH_COLOR(m_dashCoolantVal, ct>105?"#e04040":ct>95?"#d09030":"#00d4b4");
+    }
+    // TCM: line pressure -> m_dashMotBoostVal (reused in TCM mode)
+    if(v.contains(0x15) && m_dashMotBoostVal && m_activeModId == WJDiagnostics::Module::KLineTCM){
+        DASH_SET(m_dashMotBoostVal, QString::number(v[0x15],'f',0));
+    }
+    // TCM: TCC slip -> m_dashMotMafVal (reused in TCM mode)
+    if(v.contains(0x17) && m_dashMotMafVal && m_activeModId == WJDiagnostics::Module::KLineTCM){
+        DASH_SET(m_dashMotMafVal, QString::number(v[0x17],'f',0));
     }
 
-    // Motor ECU KWP local ID'ler (dual mode veya ECU canli veri)
-    // 0x20 = coolant temp block'undan gelir (KWP ReadDataByLocalID)
-    if(v.contains(0xE0)){
-        // 0xE0 = ECU coolant temp (ozel mapping, Motor ECU oturumundan)
+    // ECU data
+    if(v.contains(0xE0) && m_dashMotCoolVal){
         double ct = v[0xE0];
-        m_dashMotCoolVal->setText(QString::number(ct,'f',0));
-        setGaugeColor(m_dashMotCoolVal,
-            ct > 105 ? "#e04040" : ct > 95 ? "#d09030" : "#00d4b4");
+        DASH_SET(m_dashMotCoolVal, QString::number(ct,'f',0));
+        DASH_COLOR(m_dashMotCoolVal, ct > 105 ? "#e04040" : ct > 95 ? "#d09030" : "#00d4b4");
     }
+
+    #undef DASH_SET
+    #undef DASH_COLOR
 }
 
 QWidget* MainWindow::createConnectionTab()
@@ -284,7 +413,8 @@ QWidget* MainWindow::createConnectionTab()
 
     // WiFi row
     connGrid->addWidget(new QLabel("WiFi:"), 0, 0);
-    m_hostEdit = new QLineEdit("192.168.0.10");
+    // m_hostEdit = new QLineEdit("192.168.0.10");
+    m_hostEdit = new QLineEdit("192.168.1.5");
     connGrid->addWidget(m_hostEdit, 0, 1);
     m_portSpin = new QSpinBox();
     m_portSpin->setRange(1, 65535);
@@ -319,11 +449,25 @@ QWidget* MainWindow::createConnectionTab()
 
     layout->addWidget(connBox);
 
-    // === Module List ===
+    // === Module List with scroll ===
     QGroupBox *modBox = new QGroupBox("Modules");
     modBox->setStyleSheet("QGroupBox{font-weight:bold;color:#70C8F0;font-size:14px;}");
-    m_moduleListLayout = new QVBoxLayout(modBox);
+    modBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    QVBoxLayout *modBoxLayout = new QVBoxLayout(modBox);
+    modBoxLayout->setContentsMargins(2,2,2,2);
+    m_modScroll = new QScrollArea();
+    m_modScroll->setWidgetResizable(true);
+    m_modScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_modScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_modScroll->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    m_modScroll->setStyleSheet("QScrollArea{border:none;background:transparent;}"
+        "QScrollBar:vertical{background:#0a0e14;width:6px;border-radius:3px;}"
+        "QScrollBar::handle:vertical{background:#1a4060;border-radius:3px;min-height:30px;}"
+        "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}");
+    QWidget *modListWidget = new QWidget();
+    m_moduleListLayout = new QVBoxLayout(modListWidget);
     m_moduleListLayout->setSpacing(3);
+    m_moduleListLayout->setContentsMargins(0,0,0,0);
 
     // Show verified modules prominently, others dimmed
     struct ModEntry {
@@ -370,6 +514,7 @@ QWidget* MainWindow::createConnectionTab()
                 btn->setChecked(false);
                 if (m_liveData->isPolling()) onStopLiveData();
                 updateActiveHeaderLabel();
+                rebuildDashboard();
                 statusBar()->showMessage("Module deactivated");
                 return;
             }
@@ -388,6 +533,8 @@ QWidget* MainWindow::createConnectionTab()
             m_tcm->switchToModule(me.id, [this, btn, me](bool ok) {
                 // Re-enable all buttons
                 for (auto *b : m_moduleButtons) b->setEnabled(true);
+                // Reset scroll to top
+                if (m_modScroll) m_modScroll->verticalScrollBar()->setValue(0);
 
                 if (ok) {
                     m_activeModId = me.id;
@@ -428,11 +575,13 @@ QWidget* MainWindow::createConnectionTab()
 
                     // Update live data table selections for this module
                     updateLiveTableForModule();
+                    rebuildDashboard();
 
                     statusBar()->showMessage(me.label + " active");
                 } else {
                     btn->setChecked(false);
                     m_moduleSessionActive = false;
+                    rebuildDashboard();
                     statusBar()->showMessage(me.label + " connection failed!");
                 }
                 updateActiveHeaderLabel();
@@ -443,7 +592,10 @@ QWidget* MainWindow::createConnectionTab()
         m_moduleListLayout->addWidget(btn);
     }
 
-    layout->addWidget(modBox);
+    m_moduleListLayout->addStretch();
+    m_modScroll->setWidget(modListWidget);
+    modBoxLayout->addWidget(m_modScroll);
+    layout->addWidget(modBox, 1); // stretch factor 1 = take remaining space
 
     // Active Header
     m_activeHeaderLabel = new QLabel("---");
@@ -452,7 +604,8 @@ QWidget* MainWindow::createConnectionTab()
     m_activeHeaderLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(m_activeHeaderLabel);
 
-    layout->addStretch();
+    // Enable touch scrolling on module list
+    QScroller::grabGesture(m_modScroll->viewport(), QScroller::LeftMouseButtonGesture);
 
     connect(m_connectBtn, &QPushButton::clicked, this, &MainWindow::onConnect);
     connect(m_disconnectBtn, &QPushButton::clicked, this, &MainWindow::onDisconnect);
@@ -1014,8 +1167,8 @@ void MainWindow::onLiveDataUpdated(const QMap<uint8_t, double> &values)
 void MainWindow::onFullStatusUpdated(const TCMDiagnostics::TCMStatus &status)
 {
     updateStatusLabels(status);
-    // Battery voltage from ATRV (updated in TCM cycle too)
-    if (status.batteryVoltage > 0) {
+    // Battery voltage from ATRV
+    if (status.batteryVoltage > 0 && m_dashBatVoltVal) {
         m_dashBatVoltVal->setText(QString::number(status.batteryVoltage, 'f', 1));
         setGaugeColor(m_dashBatVoltVal,
             status.batteryVoltage < 11.5 ? "#e04040" : status.batteryVoltage < 12.5 ? "#d09030" : "#00d4b4");
@@ -1024,35 +1177,50 @@ void MainWindow::onFullStatusUpdated(const TCMDiagnostics::TCMStatus &status)
 
 void MainWindow::onECUDataUpdated(const TCMDiagnostics::ECUStatus &ecu)
 {
+    #define ESET(lbl, txt) if(lbl) lbl->setText(txt)
+    #define ECOL(lbl, col) if(lbl) setGaugeColor(lbl, col)
+
     // Motor RPM
-    m_dashMotRpmVal->setText(QString::number(ecu.rpm, 'f', 0));
-    setGaugeColor(m_dashMotRpmVal,
-        ecu.rpm > 4500 ? "#e04040" : ecu.rpm > 3500 ? "#d09030" : "#00d4b4");
+    ESET(m_dashMotRpmVal, QString::number(ecu.rpm, 'f', 0));
+    ECOL(m_dashMotRpmVal, ecu.rpm > 4500 ? "#e04040" : ecu.rpm > 3500 ? "#d09030" : "#00d4b4");
 
     // Boost Pressure (mbar)
-    m_dashMotBoostVal->setText(QString::number(ecu.boostPressure, 'f', 0));
-    setGaugeColor(m_dashMotBoostVal,
-        ecu.boostPressure > 2000 ? "#e04040" : ecu.boostPressure > 1500 ? "#d09030" : "#00d4b4");
+    ESET(m_dashMotBoostVal, QString::number(ecu.boostPressure, 'f', 0));
+    ECOL(m_dashMotBoostVal, ecu.boostPressure > 2000 ? "#e04040" : ecu.boostPressure > 1500 ? "#d09030" : "#00d4b4");
 
     // MAF
-    m_dashMotMafVal->setText(QString::number(ecu.mafActual, 'f', 0));
+    ESET(m_dashMotMafVal, QString::number(ecu.mafActual, 'f', 0));
 
     // Rail Pressure (bar)
-    m_dashMotRailVal->setText(QString::number(ecu.railActual, 'f', 0));
-    setGaugeColor(m_dashMotRailVal,
-        ecu.railActual > 1400 ? "#e04040" : ecu.railActual > 1200 ? "#d09030" : "#00d4b4");
+    ESET(m_dashMotRailVal, QString::number(ecu.railActual, 'f', 0));
+    ECOL(m_dashMotRailVal, ecu.railActual > 1400 ? "#e04040" : ecu.railActual > 1200 ? "#d09030" : "#00d4b4");
 
-    // Su sicakligi (Motor ECU'dan gelen coolant)
-    m_dashMotCoolVal->setText(QString::number(ecu.coolantTemp, 'f', 0));
-    setGaugeColor(m_dashMotCoolVal,
-        ecu.coolantTemp > 105 ? "#e04040" : ecu.coolantTemp > 95 ? "#d09030" : "#00d4b4");
+    // Coolant temp
+    ESET(m_dashMotCoolVal, QString::number(ecu.coolantTemp, 'f', 0));
+    ECOL(m_dashMotCoolVal, ecu.coolantTemp > 105 ? "#e04040" : ecu.coolantTemp > 95 ? "#d09030" : "#00d4b4");
 
-    // Battery voltage (ECU'dan)
+    // IAT -> m_dashCoolantVal (reused in ECU mode)
+    ESET(m_dashCoolantVal, QString::number(ecu.iat, 'f', 0));
+
+    // TPS -> m_dashLimpVal (reused in ECU mode)
+    ESET(m_dashLimpVal, QString::number(ecu.tps, 'f', 1));
+
+    // Injection quantity -> m_dashSpeedVal (reused in ECU mode)
+    ESET(m_dashSpeedVal, QString::number(ecu.injectionQty, 'f', 1));
+
+    // Protected data gauges (only populated if security unlocked)
+    ESET(m_dashEgrVal, QString::number(ecu.egrDuty, 'f', 0));
+    ESET(m_dashWgVal, QString::number(ecu.wastegate, 'f', 0));
+    ESET(m_dashFuelAdaptVal, QString::number(ecu.fuelAdapt, 'f', 2));
+
+    // Battery voltage (ATRV)
     if (ecu.batteryVoltage > 0) {
-        m_dashBatVoltVal->setText(QString::number(ecu.batteryVoltage, 'f', 1));
-        setGaugeColor(m_dashBatVoltVal,
-            ecu.batteryVoltage < 11.5 ? "#e04040" : ecu.batteryVoltage < 12.5 ? "#d09030" : "#00d4b4");
+        ESET(m_dashBatVoltVal, QString::number(ecu.batteryVoltage, 'f', 1));
+        ECOL(m_dashBatVoltVal, ecu.batteryVoltage < 11.5 ? "#e04040" : ecu.batteryVoltage < 12.5 ? "#d09030" : "#00d4b4");
     }
+
+    #undef ESET
+    #undef ECOL
 }
 
 
@@ -1162,7 +1330,7 @@ QString MainWindow::gearToString(TCMDiagnostics::Gear gear)
 
 
 
-// --- Raw Data Read - Test v11: APK-informed correct SID per module ---
+// --- Raw Data Read - Test v11: correct SID per module ---
 void MainWindow::onRawBusDump()
 {
     m_rawDumpBtn->setEnabled(false);
@@ -1180,7 +1348,7 @@ void MainWindow::onRawBusDump()
         m_rawDumpBtn->setText("Raw Data Read");
     };
 
-    m_logText->append("<font color='white'>========== TEST v11 (APK-verified SIDs) ==========</font>");
+    m_logText->append("<font color='white'>========== TEST v12 ==========</font>");
     runDiscoveryPhases(log, done);
 }
 
@@ -1192,141 +1360,159 @@ void MainWindow::runDiscoveryPhases(
     auto steps = std::make_shared<QList<Step>>();
 
     // =================================================================
-    // PHASE 1: BCM (0x80) SID 0x2E — 35+ PIDs from APK
+    // PHASE 1: J1850 Module Discovery
+    // APK uses: ATZ -> ATSP2 -> ATIFR0 -> ATH1 -> ATSH24XX22 -> ATRAXX
+    // Some modules use different mode bytes (A0, 10, 20, 14, 31, A3)
     // =================================================================
-    steps->append(Step{"", "header:=== Phase 1: BCM (0x80) SID 0x2E ==="});
+    steps->append(Step{"", "header:=== Phase 1: J1850 Module Discovery ==="});
     steps->append(Step{"", "switch:j1850"});
+
+    // --- BCM (0x80) SID 0x2E ---
+    steps->append(Step{"", "header:--- BCM 0x80 ---"});
     steps->append(Step{"", "j1850hdr:ATSH248022"});
     steps->append(Step{"", "j1850hdr:ATRA80"});
-    for (int pid : {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0D,
-                    0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
-                    0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
-                    0x30,0x50,0x51,0x52,0x53,0x54}) {
-        steps->append(Step{
-            QString("BCM 2E %1").arg(pid, 2, 16, QChar('0')).toUpper(),
-            QString("j1850cmd:2E %1 00").arg(pid, 2, 16, QChar('0')).toUpper()
-        });
-    }
+    steps->append(Step{"BCM 2E 00", "j1850cmd:2E 00 00"});
+    steps->append(Step{"BCM 2E 0D", "j1850cmd:2E 0D 00"});
     steps->append(Step{"BCM 1A 87", "j1850cmd:1A 87 00"});
     steps->append(Step{"BCM 24 00", "j1850cmd:24 00 00"});
+    // APK also uses mode 0x11 for clear — try 0x10 for functional read
+    steps->append(Step{"", "j1850hdr:ATSH248010"});
+    steps->append(Step{"BCM-10 2E 00", "j1850cmd:2E 00 00"});
+    // Mode 0x20 (request download in some Chrysler modules)
+    steps->append(Step{"", "j1850hdr:ATSH248020"});
+    steps->append(Step{"BCM-20 2E 00", "j1850cmd:2E 00 00"});
 
-    // =================================================================
-    // PHASE 2: Cluster (0x90) SID 0x32
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 2: Cluster (0x90) SID 0x32 ==="});
+    // --- Cluster (0x90) SID 0x32 ---
+    steps->append(Step{"", "header:--- Cluster 0x90 ---"});
     steps->append(Step{"", "j1850hdr:ATSH249022"});
-    for (int pid : {0x00,0x01,0x02,0x03,0x04,0x05,
-                    0x10,0x11,0x13,0x14,0x15,0x16,0x17,0x18,
-                    0x21,0x25,0x26,0x27,0x28}) {
-        steps->append(Step{
-            QString("Cluster 32 %1").arg(pid, 2, 16, QChar('0')).toUpper(),
-            QString("j1850cmd:32 %1 00").arg(pid, 2, 16, QChar('0')).toUpper()
-        });
-    }
-    steps->append(Step{"Cluster 1A 87", "j1850cmd:1A 87 00"});
+    steps->append(Step{"", "j1850hdr:ATRA90"});
+    steps->append(Step{"Clust 32 00", "j1850cmd:32 00 00"});
+    steps->append(Step{"Clust 1A 87", "j1850cmd:1A 87 00"});
+    steps->append(Step{"", "j1850hdr:ATSH249010"});
+    steps->append(Step{"Clust-10 32 00", "j1850cmd:32 00 00"});
 
-    // =================================================================
-    // PHASE 3: Overhead Console (0x28) SID 0x2A
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 3: Overhead (0x28) SID 0x2A ==="});
+    // --- Overhead Console (0x28) SID 0x2A ---
+    // APK uses multiple mode bytes: A0, 10, 22, 20, A3, 14, 30
+    steps->append(Step{"", "header:--- Overhead 0x28 (multi-mode) ---"});
     steps->append(Step{"", "j1850hdr:ATSH242822"});
-    for (int pid : {0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x1F}) {
-        steps->append(Step{
-            QString("OHC 2A %1").arg(pid, 2, 16, QChar('0')).toUpper(),
-            QString("j1850cmd:2A %1 00").arg(pid, 2, 16, QChar('0')).toUpper()
-        });
-    }
+    steps->append(Step{"", "j1850hdr:ATRA28"});
+    steps->append(Step{"OHC-22 2A 03", "j1850cmd:2A 03 00"});
+    steps->append(Step{"OHC-22 1A 87", "j1850cmd:1A 87 00"});
+    // Mode 0xA0 — APK primary read mode
+    steps->append(Step{"", "j1850hdr:ATSH2428A0"});
+    steps->append(Step{"OHC-A0 20 08", "j1850cmd:20 08 00"});
+    steps->append(Step{"OHC-A0 20 02", "j1850cmd:20 02 00"});
+    steps->append(Step{"OHC-A0 24 00", "j1850cmd:24 00 00"});
+    // Mode 0x10
+    steps->append(Step{"", "j1850hdr:ATSH242810"});
+    steps->append(Step{"OHC-10 20 00", "j1850cmd:20 00 00"});
+    // Mode 0x20
+    steps->append(Step{"", "j1850hdr:ATSH242820"});
+    steps->append(Step{"OHC-20 20 07", "j1850cmd:20 07 00"});
 
-    // =================================================================
-    // PHASE 4: MemSeat (0x98) SID 0x38
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 4: MemSeat (0x98) SID 0x38 ==="});
+    // --- MemSeat (0x98) SID 0x38 ---
+    steps->append(Step{"", "header:--- MemSeat 0x98 ---"});
     steps->append(Step{"", "j1850hdr:ATSH249822"});
-    for (int pid : {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0F,0x10,0x18}) {
-        steps->append(Step{
-            QString("Seat 38 %1").arg(pid, 2, 16, QChar('0')).toUpper(),
-            QString("j1850cmd:38 %1 00").arg(pid, 2, 16, QChar('0')).toUpper()
-        });
-    }
+    steps->append(Step{"", "j1850hdr:ATRA98"});
+    steps->append(Step{"Seat 38 00", "j1850cmd:38 00 00"});
+    steps->append(Step{"Seat 1A 87", "j1850cmd:1A 87 00"});
 
-    // =================================================================
-    // PHASE 5: VTSS (0xC0) + Module 0xA1 + EVIC (0x2A) + Radio (0x87) + Liftgate (0xA0)
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 5: VTSS/0xA1/EVIC/Radio/Liftgate ==="});
-    // VTSS
+    // --- SKIM (0x62) SID 0x38/0x3A ---
+    steps->append(Step{"", "header:--- SKIM 0x62 ---"});
+    steps->append(Step{"", "j1850hdr:ATSH246222"});
+    steps->append(Step{"", "j1850hdr:ATRA62"});
+    steps->append(Step{"SKIM 38 00", "j1850cmd:38 00 01"});
+    steps->append(Step{"SKIM 3A 00", "j1850cmd:3A 00 01"});
+    steps->append(Step{"SKIM 1A 87", "j1850cmd:1A 87 00"});
+
+    // --- VTSS (0xC0) ---
+    // APK uses mode 0x27 and 0x22
+    steps->append(Step{"", "header:--- VTSS 0xC0 ---"});
     steps->append(Step{"", "j1850hdr:ATSH24C022"});
+    steps->append(Step{"", "j1850hdr:ATRAC0"});
     steps->append(Step{"VTSS 2E 00", "j1850cmd:2E 00 00"});
-    steps->append(Step{"VTSS 20 00", "j1850cmd:20 00 00"});
-    steps->append(Step{"VTSS 38 00", "j1850cmd:38 00 00"});
     steps->append(Step{"VTSS 1A 87", "j1850cmd:1A 87 00"});
-    // 0xA1
-    steps->append(Step{"", "j1850hdr:ATSH24A122"});
-    steps->append(Step{"0xA1 2E 00", "j1850cmd:2E 00 00"});
-    steps->append(Step{"0xA1 1A 87", "j1850cmd:1A 87 00"});
-    // EVIC
-    steps->append(Step{"", "j1850hdr:ATSH242A22"});
-    steps->append(Step{"EVIC 2A 03", "j1850cmd:2A 03 00"});
-    steps->append(Step{"EVIC 1A 87", "j1850cmd:1A 87 00"});
-    // Radio
-    steps->append(Step{"", "j1850hdr:ATSH248722"});
-    steps->append(Step{"Radio 2F 01", "j1850cmd:2F 01 00"});
-    steps->append(Step{"Radio 1A 87", "j1850cmd:1A 87 00"});
-    // Liftgate
-    steps->append(Step{"", "j1850hdr:ATSH24A022"});
-    steps->append(Step{"Liftgate 2E 00", "j1850cmd:2E 00 00"});
-    steps->append(Step{"Liftgate 1A 87", "j1850cmd:1A 87 00"});
+    steps->append(Step{"", "j1850hdr:ATSH24C027"});
+    steps->append(Step{"VTSS-27 28 00", "j1850cmd:28 00 00"});
 
-    // =================================================================
-    // PHASE 6: Airbag retry — 28 37 01 + security + routine modes
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 6: Airbag (0x60) APK Retry ==="});
+    // --- Airbag (0x60) ---
+    // APK uses mode 0xA0 for reading, 0x22 for diag, 0x27 for security, 0xA3
+    steps->append(Step{"", "header:--- Airbag 0x60 (multi-mode) ---"});
     steps->append(Step{"", "j1850hdr:ATSH246022"});
     steps->append(Step{"", "j1850hdr:ATRA60"});
-    steps->append(Step{"Airbag 28 37 01 (NEW)", "j1850cmd:28 37 01"});
-    steps->append(Step{"Airbag 28 3F 00", "j1850cmd:28 3F 00"});
-    steps->append(Step{"Airbag 28 0D 00", "j1850cmd:28 0D 00"});
-    steps->append(Step{"Airbag 28 0D 01", "j1850cmd:28 0D 01"});
-    // Security mode header
+    steps->append(Step{"Air-22 28 37 01", "j1850cmd:28 37 01"});
+    steps->append(Step{"Air-22 28 0D 00", "j1850cmd:28 0D 00"});
+    // Mode 0xA0 — APK primary read mode
+    steps->append(Step{"", "j1850hdr:ATSH2460A0"});
+    steps->append(Step{"Air-A0 20 00", "j1850cmd:20 00 00"});
+    steps->append(Step{"Air-A0 24 00", "j1850cmd:24 00 00"});
+    // Security mode 0x27
     steps->append(Step{"", "j1850hdr:ATSH246027"});
-    steps->append(Step{"AirSec 28 37 00", "j1850cmd:28 37 00"});
-    steps->append(Step{"AirSec 28 00 00", "j1850cmd:28 00 00"});
-    steps->append(Step{"AirSec 27 01 00", "j1850cmd:27 01 00"});
-    // Routine mode
+    steps->append(Step{"AirSec 28 37", "j1850cmd:28 37 00"});
+    steps->append(Step{"AirSec 27 01", "j1850cmd:27 01 00"});
+    // Mode 0xA3
+    steps->append(Step{"", "j1850hdr:ATSH2460A3"});
+    steps->append(Step{"Air-A3 02 00", "j1850cmd:02 00 00"});
+    // Routine mode 0x31
     steps->append(Step{"", "j1850hdr:ATSH246031"});
-    steps->append(Step{"AirRtn 31 25 00", "j1850cmd:31 25 00"});
-    steps->append(Step{"AirRtn 28 37 00", "j1850cmd:28 37 00"});
+    steps->append(Step{"AirRtn 31 25", "j1850cmd:31 25 00"});
     steps->append(Step{"", "j1850hdr:ATSH246022"});
 
-    // =================================================================
-    // PHASE 7: SKIM (0x62) SID 0x38/0x3A
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 7: SKIM (0x62) SID 0x38/0x3A ==="});
-    steps->append(Step{"", "j1850hdr:ATSH246222"});
-    steps->append(Step{"SKIM 38 00 01", "j1850cmd:38 00 01"});
-    steps->append(Step{"SKIM 38 01 00", "j1850cmd:38 01 00"});
-    steps->append(Step{"SKIM 38 18 00", "j1850cmd:38 18 00"});
-    steps->append(Step{"SKIM 3A 00 01", "j1850cmd:3A 00 01"});
-    steps->append(Step{"SKIM 3A 01 01", "j1850cmd:3A 01 01"});
+    // --- Radio (0x87) ---
+    steps->append(Step{"", "header:--- Radio 0x87 ---"});
+    steps->append(Step{"", "j1850hdr:ATSH248722"});
+    steps->append(Step{"", "j1850hdr:ATRA87"});
+    steps->append(Step{"Radio 2F 01", "j1850cmd:2F 01 00"});
+    steps->append(Step{"Radio 1A 87", "j1850cmd:1A 87 00"});
 
-    // =================================================================
-    // PHASE 8: HVAC (0x68) PID 04-20
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 8: HVAC PID 04-20 ==="});
+    // --- Module 0xA1 ---
+    steps->append(Step{"", "header:--- Module 0xA1 ---"});
+    steps->append(Step{"", "j1850hdr:ATSH24A122"});
+    steps->append(Step{"", "j1850hdr:ATRAA1"});
+    steps->append(Step{"0xA1 2E 00", "j1850cmd:2E 00 00"});
+    // APK uses mode 0x31 and 0x33
+    steps->append(Step{"", "j1850hdr:ATSH24A131"});
+    steps->append(Step{"0xA1-31 0D 10", "j1850cmd:0D 10 00"});
+    steps->append(Step{"", "j1850hdr:ATSH24A133"});
+    steps->append(Step{"0xA1-33 0D 10", "j1850cmd:0D 10 00"});
+
+    // --- Liftgate (0xA0) ---
+    steps->append(Step{"", "header:--- Liftgate 0xA0 ---"});
+    steps->append(Step{"", "j1850hdr:ATSH24A022"});
+    steps->append(Step{"", "j1850hdr:ATRAA0"});
+    steps->append(Step{"Liftgate 2E 00", "j1850cmd:2E 00 00"});
+
+    // --- EVIC (0x2A) ---
+    steps->append(Step{"", "header:--- EVIC 0x2A ---"});
+    steps->append(Step{"", "j1850hdr:ATSH242A22"});
+    steps->append(Step{"", "j1850hdr:ATRA2A"});
+    steps->append(Step{"EVIC 2A 03", "j1850cmd:2A 03 00"});
+
+    // --- HVAC (0x68) multiple modes ---
+    // APK uses 0x22, 0x31, 0x33, 0x11
+    steps->append(Step{"", "header:--- HVAC 0x68 (multi-mode) ---"});
     steps->append(Step{"", "j1850hdr:ATSH246822"});
-    for (int pid = 0x04; pid <= 0x20; pid++) {
+    steps->append(Step{"", "j1850hdr:ATRA68"});
+    for (int pid = 0x00; pid <= 0x10; pid++) {
         steps->append(Step{
             QString("HVAC %1").arg(pid, 2, 16, QChar('0')).toUpper(),
             QString("j1850cmd:28 %1 00").arg(pid, 2, 16, QChar('0')).toUpper()
         });
     }
+    // Mode 0x31 (routine)
+    steps->append(Step{"", "j1850hdr:ATSH246831"});
+    steps->append(Step{"HVAC-31 28 00", "j1850cmd:28 00 00"});
+    // Mode 0x33
+    steps->append(Step{"", "j1850hdr:ATSH246833"});
+    steps->append(Step{"HVAC-33 2E 02", "j1850cmd:2E 02 00"});
 
     // =================================================================
-    // PHASE 9: TCM 0x33-0x3E scan
+    // PHASE 5: TCM full block scan
     // =================================================================
-    steps->append(Step{"", "header:=== Phase 9: TCM 0x33-0x3E ==="});
+    steps->append(Step{"", "header:=== Phase 5: TCM blocks ==="});
     steps->append(Step{"", "switch:tcm"});
     steps->append(Step{"TCM 0x30 ref", "cmd:21 30"});
-    for (int b = 0x33; b <= 0x3E; b++) {
+    for (int b : {0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x3E}) {
         steps->append(Step{
             QString("TCM 0x%1").arg(b, 2, 16, QChar('0')).toUpper(),
             QString("cmd:21 %1").arg(b, 2, 16, QChar('0')).toUpper()
@@ -1334,11 +1520,26 @@ void MainWindow::runDiscoveryPhases(
     }
 
     // =================================================================
-    // PHASE 10: ECU Security — ArvutaKoodi (APK x86_64 disasm)
-    // Lookup-table algorithm extracted from WJdiag-Pro.apk
+    // PHASE 6: ECU Security — ArvutaKoodi + protected blocks
     // =================================================================
-    steps->append(Step{"", "header:=== Phase 10: ECU ArvutaKoodi test ==="});
+    steps->append(Step{"", "header:=== Phase 6: ECU ArvutaKoodi ==="});
     steps->append(Step{"", "switch:ecu_arvuta"});
+
+    // =================================================================
+    // PHASE 7: ECU full block scan (post-security)
+    // =================================================================
+    steps->append(Step{"", "header:=== Phase 7: ECU blocks ==="});
+    // After ecu_arvuta, K-Line is on ECU with security unlocked
+    for (int b : {0x10,0x12,0x14,0x16,0x18,0x20,0x22,0x24,0x26,0x28,0x30,
+                  0x32,0x34,0x38,0x40,0x42,0x44,0x48,0x62,0xB0,0xB1,0xB2}) {
+        steps->append(Step{
+            QString("ECU 0x%1").arg(b, 2, 16, QChar('0')).toUpper(),
+            QString("cmd:21 %1").arg(b, 2, 16, QChar('0')).toUpper()
+        });
+    }
+    steps->append(Step{"ECU VIN", "cmd:1A 90"});
+    steps->append(Step{"ECU 1A 91", "cmd:1A 91"});
+    steps->append(Step{"ECU 1A 86", "cmd:1A 86"});
 
     // Final
     steps->append(Step{"", "header:--- Final ---"});
@@ -1352,7 +1553,7 @@ void MainWindow::runDiscoveryPhases(
 
     *run = [this, steps, idx, run, log, done]() {
         if (*idx >= steps->size()) {
-            m_logText->append("<font color='white'>========== TEST v11 BITTI ==========</font>");
+            m_logText->append("<font color='white'>========== TEST v12 BITTI ==========</font>");
             log("#ffff00", "COPY LOG ile kopyala!");
             done();
             return;
@@ -1377,25 +1578,25 @@ void MainWindow::runDiscoveryPhases(
             }); return;
         }
         if (step.action == "switch:ecu_arvuta") {
-            // ArvutaKoodi — extracted from WJdiag-Pro.apk x86_64 native lib
-            // Lookup-table algorithm, NOT ProcessKey5
+            // ArvutaKoodi — lookup-table seed-key algorithm
+            // Discovered through trial-and-error testing
             static const uint8_t T1[] = {0xC0,0xD0,0xE0,0xF0,0x00,0x10,0x20,0x30,0x40,0x50,0x60,0x70,0x80,0x90,0xA0,0xB0};
             static const uint8_t T2[] = {0x02,0x03,0x00,0x01,0x06,0x07,0x04,0x05,0x0A,0x0B,0x08,0x09,0x0E,0x0F,0x0C,0x0D};
             static const uint8_t T3[] = {0x90,0x80,0xF0,0xE0,0xD0,0xC0,0x30,0x20,0x10,0x00,0x70,0x60,0x50,0x40,0xB0,0xA0};
             static const uint8_t T4[] = {0x0D,0x0C,0x0F,0x0E,0x09,0x08,0x0B,0x0A,0x05,0x04,0x07,0x06,0x01,0x00,0x03,0x02};
-            m_elm->sendCommand("ATZ", [this, log, run, T1, T2, T3, T4](const QString &) {
-            QTimer::singleShot(500, this, [this, log, run, T1, T2, T3, T4]() {
-            m_elm->sendCommand("ATE1", [this, log, run, T1, T2, T3, T4](const QString &) {
-            m_elm->sendCommand("ATH1", [this, log, run, T1, T2, T3, T4](const QString &) {
-            m_elm->sendCommand("ATWM8115F13E", [this, log, run, T1, T2, T3, T4](const QString &) {
-            m_elm->sendCommand("ATSH8115F1", [this, log, run, T1, T2, T3, T4](const QString &) {
-            m_elm->sendCommand("ATSP5", [this, log, run, T1, T2, T3, T4](const QString &) {
-            m_elm->sendCommand("ATFI", [this, log, run, T1, T2, T3, T4](const QString &fi) {
+            m_elm->sendCommand("ATZ", [this, log, run](const QString &) {
+            QTimer::singleShot(500, this, [this, log, run]() {
+            m_elm->sendCommand("ATE1", [this, log, run](const QString &) {
+            m_elm->sendCommand("ATH1", [this, log, run](const QString &) {
+            m_elm->sendCommand("ATWM8115F13E", [this, log, run](const QString &) {
+            m_elm->sendCommand("ATSH8115F1", [this, log, run](const QString &) {
+            m_elm->sendCommand("ATSP5", [this, log, run](const QString &) {
+            m_elm->sendCommand("ATFI", [this, log, run](const QString &fi) {
                 if (fi.contains("ERROR") || (!fi.contains("OK") && !fi.contains("BUS INIT"))) {
                     log("#ff3333", "ATFI fail"); (*run)(); return;
                 }
-            m_elm->sendCommand("81", [this, log, run, T1, T2, T3, T4](const QString &) {
-            m_elm->sendCommand("27 01", [this, log, run, T1, T2, T3, T4](const QString &sr) {
+            m_elm->sendCommand("81", [this, log, run](const QString &) {
+            m_elm->sendCommand("27 01", [this, log, run](const QString &sr) {
                 log("#c0c0ff", "Seed resp: " + sr.trimmed());
                 QStringList p = sr.trimmed().split(' ');
                 int si = -1;

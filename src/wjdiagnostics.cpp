@@ -28,7 +28,7 @@ QList<WJDiagnostics::ModuleInfo> WJDiagnostics::allModules()
         {Module::KLineTCM, "NAG1 722.6 Transmission (K-Line)", "KL-TCM",
          BusType::KLine, "ATSH8120F1", "ATWM8120F13E", "ATSP5", ""},
 
-        // J1850 VPW modules - verified headers from APK
+        // J1850 VPW modules - verified headers
         {Module::TCM, "NAG1 722.6 Transmission (EGS52)", "TCM",
          BusType::J1850, "ATSH242822", "", "ATSP2", ""},
         {Module::EVIC, "Overhead Console (EVIC)", "EVIC",
@@ -207,7 +207,7 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                                                     .arg(s16, 4, 16, QChar('0')).arg(r, 4, 16, QChar('0')));
                                             } else if (!isTCM && ok0 && ok1) {
                                                 // EDC15C2 OM612: Level 01, 2-byte key
-                                                // ArvutaKoodi — extracted from WJdiag-Pro.apk x86_64 disassembly
+                                                // ArvutaKoodi — lookup-table seed-key for Chrysler EDC15C2
                                                 // Estonca: "Compute Code" — lookup table based, NOT ProcessKey5
                                                 static const uint8_t T1[] = {0xC0,0xD0,0xE0,0xF0,0x00,0x10,0x20,0x30,0x40,0x50,0x60,0x70,0x80,0x90,0xA0,0xB0};
                                                 static const uint8_t T2[] = {0x02,0x03,0x00,0x01,0x06,0x07,0x04,0x05,0x0A,0x0B,0x08,0x09,0x0E,0x0F,0x0C,0x0D};
@@ -231,7 +231,7 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                                             bool unlocked = key.contains("67 02", Qt::CaseInsensitive);
                                             if (unlocked) {
                                                 emit logMessage("Security UNLOCKED!");
-                                                if (targetMod == Module::ECU)
+                                                if (targetMod == Module::MotorECU)
                                                     m_ecuSecurityUnlocked = true;
                                             }
                                             emit logMessage("K-Line session active (ECU ready)");
@@ -284,7 +284,7 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                             m_activeModule = targetMod;
                             emit logMessage(QString("Active: %1 | %2").arg(info.shortName, info.atshHeader));
 
-                            // TCM needs DiagSession before data read (APK verified)
+                            // TCM needs DiagSession before data read (verified)
                             if (targetMod == Module::TCM) {
                                 m_elm->sendCommand("ATSH242810", [this, done](const QString&) {
                                     QTimer::singleShot(100, this, [this, done]() {
@@ -343,7 +343,7 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                 m_activeModule = targetMod;
                 emit logMessage(QString("Active: %1 | %2").arg(info.shortName, info.atshHeader));
 
-                // TCM needs DiagSession before data read (APK verified)
+                // TCM needs DiagSession before data read (verified)
                 if (targetMod == Module::TCM) {
                     m_elm->sendCommand("ATSH242810", [this, done](const QString&) {
                         QTimer::singleShot(100, this, [this, done]() {
@@ -424,7 +424,7 @@ void WJDiagnostics::readDTCs(Module mod, std::function<void(const QList<DTCEntry
                 if (cb) cb(r);
             });
         } else {
-            // J1850 DTC read (APK verified):
+            // J1850 DTC read (verified):
             // ABS: ATSH244022 → "24 00 00" (DTC as special PID via ReadDataByID)
             // Airbag: ATSH246022 → "28 37 00" (DTC PID 0x37)
             uint8_t modAddr = static_cast<uint8_t>(mod);
@@ -467,7 +467,7 @@ void WJDiagnostics::clearDTCs(Module mod, std::function<void(bool)> cb)
         if (moduleInfo(mod).bus == BusType::KLine) {
             m_kwp->clearAllDTCs(cb);
         } else {
-            // J1850 DTC clear (APK verified):
+            // J1850 DTC clear (verified):
             // ABS: ATSH244011 → "01 01 00" (ECUReset = clears DTCs)
             // Airbag: ATSH246011 → "0D" (ECUReset with param)
             uint8_t modAddr = static_cast<uint8_t>(mod);
@@ -697,7 +697,7 @@ void WJDiagnostics::rawBusDump(Module mod, const QList<uint8_t> &ids,
                 QTimer::singleShot(340, *readNext);
             });
         } else {
-            // APK format: each module has its own SID prefix
+            // Each module has its own SID prefix
             // TCM(0x28)->2E, ABS(0x40)->20, Airbag(0x60)->28
             uint8_t sidPrefix = 0x22; // default
             uint8_t modAddr = static_cast<uint8_t>(mod);

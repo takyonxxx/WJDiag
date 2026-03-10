@@ -13,6 +13,7 @@
 #include <QProgressBar>
 #include <QComboBox>
 #include <QFrame>
+#include <QScrollArea>
 #include <functional>
 #include "elm327connection.h"
 #include "kwp2000handler.h"
@@ -49,6 +50,7 @@ private:
         std::function<void(const QString&, const QString&)> log,
         std::function<void()> done);
     QWidget* createDashboardPanel();
+    void rebuildDashboard();
     QFrame* createGaugeCard(const QString&,const QString&,const QString&,QLabel**,QLabel**);
     QWidget* createConnectionTab();
     QWidget* createDTCTab();
@@ -75,6 +77,7 @@ private:
     bool m_moduleSessionActive = false;
     QList<QPushButton*> m_moduleButtons;
     QVBoxLayout *m_moduleListLayout = nullptr;
+    QScrollArea *m_modScroll = nullptr;
     QLabel *m_connStatusLabel;
     QTimer *m_batteryTimer = nullptr;  // ATRV periyodik okuma
     QString m_lastLogPath;
@@ -95,6 +98,16 @@ private:
     QLabel *m_dashMotBoostVal,*m_dashMotBoostUnit;
     QLabel *m_dashMotMafVal,*m_dashMotMafUnit;
     QLabel *m_dashMotRailVal,*m_dashMotRailUnit;
+    // ECU protected data gauges
+    QLabel *m_dashEgrVal=nullptr,*m_dashEgrUnit=nullptr;
+    QLabel *m_dashWgVal=nullptr,*m_dashWgUnit=nullptr;
+    QLabel *m_dashInjAdaptVal=nullptr,*m_dashInjAdaptUnit=nullptr;
+    QLabel *m_dashFuelAdaptVal=nullptr,*m_dashFuelAdaptUnit=nullptr;
+    QLabel *m_dashBoostAdaptVal=nullptr,*m_dashBoostAdaptUnit=nullptr;
+    QLabel *m_dashOilPressVal=nullptr,*m_dashOilPressUnit=nullptr;
+    // Dashboard container
+    QWidget *m_dashStack=nullptr;
+    QVBoxLayout *m_dashLayout=nullptr;
     QProgressBar *m_throttleBar;
     // ABS tab
     QTableWidget *m_absDtcTable=nullptr;
