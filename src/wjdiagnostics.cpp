@@ -1092,38 +1092,60 @@ void WJDiagnostics::parseTCMBlock30(const QByteArray &raw, TCMStatus &tcm)
     // [0-1]   Turbine/Input RPM (P/N: ~20, R/D idle: ~750, D+gas: ~1100+)
     // [2-3]   Engagement status (0x1E=30 for P/N, 0x3C=60 for R/D)
     // [4-5]   Vehicle Speed (0 when stationary)
-    // [7]     Gear selector: P=8, R=7, N=6, D=5
-    // [8]     Config byte (always 4)
-    // [9-10]  Solenoid pressure (P:221, R:187, N:0, D:17)
+    // VERIFIED BYTE MAPPING (real vehicle, idle + driving tested):
+    // [0-1]   Turbine/Input RPM (P/N: ~10-20, R/D idle: ~750, D driving: 300-1900)
+    // [2-3]   Engage status (0x1E=30 for P/N, 0x3C=60 for R/D, varies during shifts)
+    // [4-5]   Output Shaft RPM (0 when stopped, 600-800+ when driving)
+    // [7]     Gear range: P=8, R=7, N=6, D=5 (NOT actual gear number!)
+    // [8]     Config (always 4)
+    // [9-10]  Line pressure (signed, varies widely: P:221, D:17, driving:1000+)
     // [11]    Trans Temp raw (subtract 40 for Celsius)
-    // [12-13] TCC Slip actual (signed: P/N: -10, R/D: +26..+149)
-    // [14-15] TCC Slip desired (signed: follows actual)
-    // [18]    Solenoid state (P/N: 0x96, R/D: 0x00)
-    // [19]    Mode bitmask (0x18=P/N, 0x10=D)
+    // [12-13] TCC Slip actual (signed)
+    // [14-15] TCC Slip desired (signed)
+    // [16-17] Additional data (changes during driving)
+    // [18]    Solenoid mode bitmask (P/N:0x96, D idle:0x00, D driving:0x08, decel:0x48)
+    // [19]    Status flags
+    // [20-21] Flags
 
     // Turbine RPM
     tcm.turbineRPM = u16(0);
 
-    // Vehicle Speed
-    tcm.vehicleSpeed = u16(4);
+    // Output Shaft RPM (NOT vehicle speed directly)
+    uint16_t outputRPM = u16(4);
+    // Vehicle speed from output RPM: NAG1 722.6 final drive ~3.27, tire ~2.1m circ
+    // speed_kmh = outputRPM * 60 * 2.1 / (3.27 * 1000) ≈ outputRPM * 0.0385
+    tcm.vehicleSpeed = outputRPM * 0.0385;
+    tcm.outputRPM = outputRPM;
 
     // Trans Temp
     tcm.transTemp = u8(11) - 40;
 
-    // Solenoid supply: byte[9-10] as pressure/current indicator
-    tcm.solenoidSupply = u16(9) * 0.1;
+    // Solenoid supply: NOT available in block 0x30
+    // byte[9-10] is line pressure, not voltage
+    // byte[18] is mode bitmask, not voltage
+    tcm.solenoidSupply = 0;  // unknown from this block
 
-    // Gear from byte[7]: P=8, R=7, N=6, D=5
+    // Gear from byte[7]: this is SELECTOR RANGE, not actual gear
+    // P=8, R=7, N=6, D=5 (all drive gears show as 5)
     uint8_t gearByte = u8(7);
     switch (gearByte) {
     case 8: tcm.currentGear = Gear::Park;    tcm.actualGear = 0; break;
     case 7: tcm.currentGear = Gear::Reverse; tcm.actualGear = 1; break;
     case 6: tcm.currentGear = Gear::Neutral; tcm.actualGear = 2; break;
-    case 5: tcm.currentGear = Gear::Drive1;  tcm.actualGear = 3; break;
-    case 4: tcm.currentGear = Gear::Drive2;  tcm.actualGear = 4; break;
-    case 3: tcm.currentGear = Gear::Drive3;  tcm.actualGear = 5; break;
-    case 2: tcm.currentGear = Gear::Drive4;  tcm.actualGear = 6; break;
-    case 1: tcm.currentGear = Gear::Drive5;  tcm.actualGear = 7; break;
+    case 5: // D range - all drive gears (1-5) show as byte[7]=5
+        // Estimate actual gear from RPM ratio if both turbine and output are valid
+        if (tcm.turbineRPM > 100 && outputRPM > 100) {
+            double ratio = tcm.turbineRPM / (double)outputRPM;
+            // NAG1 722.6 ratios: 1st=3.59, 2nd=2.19, 3rd=1.41, 4th=1.00, 5th=0.83
+            if (ratio > 2.8)      { tcm.currentGear = Gear::Drive1; tcm.actualGear = 3; }
+            else if (ratio > 1.7) { tcm.currentGear = Gear::Drive2; tcm.actualGear = 4; }
+            else if (ratio > 1.15){ tcm.currentGear = Gear::Drive3; tcm.actualGear = 5; }
+            else if (ratio > 0.9) { tcm.currentGear = Gear::Drive4; tcm.actualGear = 6; }
+            else                  { tcm.currentGear = Gear::Drive5; tcm.actualGear = 7; }
+        } else {
+            tcm.currentGear = Gear::Drive1; tcm.actualGear = 3; // D idle, no motion
+        }
+        break;
     default: tcm.currentGear = Gear::Unknown; tcm.actualGear = -1; break;
     }
     tcm.selectedGear = tcm.actualGear;

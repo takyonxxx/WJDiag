@@ -45,9 +45,9 @@ private slots:
 #endif
 private:
     void setupUI();
-    void phase2_ExtraBlocks(
-        
-        std::function<void(const QString&, const QString&)> logRaw);
+    void runDiscoveryPhases(
+        std::function<void(const QString&, const QString&)> log,
+        std::function<void()> done);
     QWidget* createDashboardPanel();
     QFrame* createGaugeCard(const QString&,const QString&,const QString&,QLabel**,QLabel**);
     QWidget* createConnectionTab();
@@ -107,5 +107,6 @@ private:
     QTextEdit *m_logText;
     QPushButton *m_rawDumpBtn, *m_rawSendBtn;
     QLineEdit *m_rawCmdEdit;
+    QSpinBox *m_timeoutSpin;
     bool m_rawDumping = false;
 };

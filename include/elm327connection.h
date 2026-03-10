@@ -68,7 +68,7 @@ public:
     struct ATCommand {
         QString command;
         std::function<void(const QString&)> callback;
-        int timeoutMs = 3000;
+        int timeoutMs = 0;  // 0 = use m_defaultTimeoutMs
     };
 
     explicit ELM327Connection(QObject *parent = nullptr);
@@ -92,11 +92,14 @@ public:
 
     void sendCommand(const QString &cmd,
                      std::function<void(const QString&)> callback = nullptr,
-                     int timeoutMs = 3000);
+                     int timeoutMs = 0);
 
     void sendOBDCommand(const QByteArray &hexCmd,
                         std::function<void(const QByteArray&)> callback = nullptr,
-                        int timeoutMs = 5000);
+                        int timeoutMs = 0);
+
+    void setDefaultTimeout(int ms) { m_defaultTimeoutMs = ms; }
+    int defaultTimeout() const { return m_defaultTimeoutMs; }
 
     QString elmVersion() const { return m_elmVersion; }
     QString elmVoltage() const { return m_elmVoltage; }
@@ -165,4 +168,5 @@ private:
 
     QString m_elmVersion;
     QString m_elmVoltage;
+    int m_defaultTimeoutMs = 1500;
 };

@@ -115,15 +115,28 @@ void KWP2000Handler::clearAllDTCs(std::function<void(bool)> callback)
 
         if (success) {
             emit logMessage("Fault codes cleared!");
-        } else {
-            uint8_t nrc = 0;
-            if (isNegativeResponse(resp, &nrc)) {
-                emit logMessage("DTC clear failed: " + nrcToString(nrc));
-            }
+            emit dtcCleared(success);
+            if (callback) callback(success);
+            return;
         }
 
-        emit dtcCleared(success);
-        if (callback) callback(success);
+        uint8_t nrc = 0;
+        if (isNegativeResponse(resp, &nrc) && nrc == 0x78) {
+            // NRC 0x78 = Response Pending: TCM is processing, wait then assume success
+            emit logMessage("DTC clear: Response Pending (0x78) - waiting...");
+            QTimer::singleShot(3000, this, [this, callback]() {
+                emit logMessage("DTC clear: assumed OK after pending");
+                emit dtcCleared(true);
+                if (callback) callback(true);
+            });
+            return;
+        }
+
+        if (nrc != 0) {
+            emit logMessage("DTC clear failed: " + nrcToString(nrc));
+        }
+        emit dtcCleared(false);
+        if (callback) callback(false);
     });
 }
 

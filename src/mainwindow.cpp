@@ -828,6 +828,22 @@ QWidget* MainWindow::createLogTab()
     connect(m_rawCmdEdit, &QLineEdit::returnPressed, this, &MainWindow::onRawSendCustom);
     logGrid->addWidget(m_rawSendBtn, 1, 2);
 
+    // Satir 2: Timeout ayari
+    QLabel *toLabel = new QLabel("Timeout:");
+    toLabel->setStyleSheet("color:#808890; font-size:11px;");
+    logGrid->addWidget(toLabel, 2, 0);
+    m_timeoutSpin = new QSpinBox();
+    m_timeoutSpin->setRange(200, 10000);
+    m_timeoutSpin->setSingleStep(100);
+    m_timeoutSpin->setValue(1500);
+    m_timeoutSpin->setSuffix(" ms");
+    m_timeoutSpin->setStyleSheet("background:#0e1828; color:#60b8a0; border:1px solid #1a3050; padding:4px; font-size:12px;");
+    connect(m_timeoutSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int val) {
+        m_elm->setDefaultTimeout(val);
+        statusBar()->showMessage(QString("Timeout: %1 ms").arg(val), 2000);
+    });
+    logGrid->addWidget(m_timeoutSpin, 2, 1, 1, 2);
+
     layout->addLayout(logGrid);
 
     return w;
@@ -1178,7 +1194,7 @@ QString MainWindow::gearToString(TCMDiagnostics::Gear gear)
     case TCMDiagnostics::Gear::Park:    return "P";
     case TCMDiagnostics::Gear::Reverse: return "R";
     case TCMDiagnostics::Gear::Neutral: return "N";
-    case TCMDiagnostics::Gear::Drive1:  return "D1";
+    case TCMDiagnostics::Gear::Drive1:  return "D";
     case TCMDiagnostics::Gear::Drive2:  return "D2";
     case TCMDiagnostics::Gear::Drive3:  return "D3";
     case TCMDiagnostics::Gear::Drive4:  return "D4";
@@ -1189,9 +1205,7 @@ QString MainWindow::gearToString(TCMDiagnostics::Gear gear)
 }
 
 
-// --- Raw Data Read - Block 0x30 Byte Mapping Discovery Test ---
-
-// --- Raw Data Read - Final Comprehensive Test v5 ---
+// --- Raw Data Read - Test v6: Security Key + Block Discovery ---
 void MainWindow::onRawBusDump()
 {
     m_rawDumpBtn->setEnabled(false);
@@ -1203,161 +1217,399 @@ void MainWindow::onRawBusDump()
         m_logText->verticalScrollBar()->setValue(m_logText->verticalScrollBar()->maximum());
     };
 
-    auto read30 = std::make_shared<std::function<void(const QString&, std::function<void()>)>>();
-    *read30 = [this, log](const QString &label, std::function<void()> next) {
-        m_elm->sendCommand("21 30", [this, label, next, log](const QString &resp) {
-            if (resp.contains("7F") || resp.contains("NO DATA") || resp.contains("ERROR")) {
-                log("#ff3333", label + ": " + resp.trimmed());
-            } else {
-                QString cleaned = resp;
-                cleaned.remove(' ').remove('\r').remove('\n');
-                int pos = cleaned.indexOf("6130", 0, Qt::CaseInsensitive);
-                if (pos >= 0) {
-                    QString dataOnly = cleaned.mid(pos + 4);
-                    if (dataOnly.length() > 2) dataOnly.chop(2);
-                    QByteArray raw;
-                    for (int i = 0; i + 1 < dataOnly.length(); i += 2) {
-                        bool ok2;
-                        raw.append(static_cast<char>(dataOnly.mid(i, 2).toUInt(&ok2, 16)));
-                    }
-                    if (raw.size() >= 19) {
-                        auto u8 = [&](int i) -> uint8_t { return (i < raw.size()) ? static_cast<uint8_t>(raw[i]) : 0; };
-                        auto u16 = [&](int i) -> uint16_t { return (uint16_t(u8(i)) << 8) | u8(i+1); };
-                        auto s16 = [&](int i) -> int16_t { return static_cast<int16_t>(u16(i)); };
-                        QString gear = "?";
-                        switch (u8(7)) {
-                            case 8: gear = "P"; break; case 7: gear = "R"; break;
-                            case 6: gear = "N"; break; case 5: gear = "D"; break;
-                            case 4: gear = "D2"; break; case 3: gear = "D3"; break;
-                            case 2: gear = "D4"; break; case 1: gear = "D5"; break;
-                        }
-                        log("#00ff88", QString("%1: GEAR=%2 RPM=%3 SPD=%4 TEMP=%5C SLIP=%6/%7 SOL=%8")
-                            .arg(label, gear).arg(u16(0)).arg(u16(4))
-                            .arg(u8(11)-40).arg(s16(12)).arg(s16(14)).arg(u8(18)));
-                    }
-                } else {
-                    log("#c08840", label + " raw: " + resp.trimmed());
-                }
+    auto done = [this]() {
+        m_rawDumpBtn->setEnabled(true);
+        m_rawDumpBtn->setText("Raw Data Read");
+    };
+
+    m_logText->append("<font color='white'>========== TEST v7 ==========</font>");
+
+    // --- Key candidates: EGS52 algorithm with different seed interpretations ---
+    // TCM seed is always 68 24 89 (static!)
+    // EGS52 algo: swap bytes, XOR 0x5AA5, multiply 0x5AA5, mask 0xFFFF
+    struct KeyCandidate {
+        QString name;
+        uint8_t hi, lo;
+    };
+    QList<KeyCandidate> keys;
+    // M2: upper16 of seed (0x6824) - most likely for EGS52
+    keys.append({"EGS52-upper16(6824)", 0xCC, 0x21});
+    // M1: lower16 of seed (0x2489)
+    keys.append({"EGS52-lower16(2489)", 0xAC, 0x25});
+    // M3: XOR bytes (68^89=E1, 24) -> E124
+    keys.append({"EGS52-xor(E124)", 0x49, 0xD4});
+    // M6: full 3-byte as big-endian 24-bit, mod 0xFFFF
+    // 0x682489 -> swap = 0x892468 & 0xFFFF = 0x2468, XOR 0x5AA5 = 0x7ECD, *0x5AA5 & 0xFFFF
+    {
+        uint16_t s = 0x2468;
+        uint16_t r = ((s << 8) & 0xFFFF) | (s >> 8);
+        r ^= 0x5AA5; r = (uint16_t)((uint32_t)r * 0x5AA5 & 0xFFFF);
+        keys.append({"EGS52-swap24(2468)", (uint8_t)(r >> 8), (uint8_t)(r & 0xFF)});
+    }
+    // M7: simple constant from Chrysler - just try common keys
+    keys.append({"const-5AA5", 0x5A, 0xA5});
+    keys.append({"const-A55A", 0xA5, 0x5A});
+
+    // --- Phase 1: TCM Security Key Brute Force ---
+    log("#00ffcc", "--- Phase 1: TCM Security Key Deneme ---");
+    log("#ffff00", "Seed: 68 24 89 (static) | 6 key deneniyor");
+
+    auto keyIdx = std::make_shared<int>(0);
+    auto keyFound = std::make_shared<bool>(false);
+    auto tryKey = std::make_shared<std::function<void()>>();
+
+    *tryKey = [this, log, done, keys, keyIdx, keyFound, tryKey]() {
+        if (*keyIdx >= keys.size() || *keyFound) {
+            if (!*keyFound) {
+                log("#ff3333", "Tum key'ler reddedildi!");
             }
-            m_logText->verticalScrollBar()->setValue(m_logText->verticalScrollBar()->maximum());
-            if (next) next();
+            // Run discovery phases after key attempts
+            runDiscoveryPhases(log, done);
+            return;
+        }
+
+        auto &k = keys[*keyIdx];
+        log("#c080ff", QString("Key #%1: %2 -> %3 %4")
+            .arg(*keyIdx + 1).arg(k.name)
+            .arg(k.hi, 2, 16, QChar('0')).arg(k.lo, 2, 16, QChar('0')));
+
+        // Manual K-Line init WITHOUT sending CD 46 key
+        // ATZ -> ATE1 -> ATH1 -> ATWM8120F13E -> ATSH8120F1 -> ATSP5 -> ATFI -> 81 -> 27 01 -> 27 02 XX XX
+        m_elm->sendCommand("ATZ", [this, log, done, keys, keyIdx, keyFound, tryKey, k](const QString &) {
+        m_elm->sendCommand("ATE1", [this, log, done, keys, keyIdx, keyFound, tryKey, k](const QString &) {
+        m_elm->sendCommand("ATH1", [this, log, done, keys, keyIdx, keyFound, tryKey, k](const QString &) {
+        m_elm->sendCommand("ATWM8120F13E", [this, log, done, keys, keyIdx, keyFound, tryKey, k](const QString &) {
+        m_elm->sendCommand("ATSH8120F1", [this, log, done, keys, keyIdx, keyFound, tryKey, k](const QString &) {
+        m_elm->sendCommand("ATSP5", [this, log, done, keys, keyIdx, keyFound, tryKey, k](const QString &) {
+        m_elm->sendCommand("ATFI", [this, log, done, keys, keyIdx, keyFound, tryKey, k](const QString &fi) {
+            if (!fi.contains("OK")) {
+                log("#ff8800", "ATFI: " + fi.trimmed() + " (retrying...)");
+                // Retry ATFI once
+                m_elm->sendCommand("ATFI", [this, log, done, keys, keyIdx, keyFound, tryKey, k](const QString &fi2) {
+                    if (!fi2.contains("OK")) {
+                        log("#ff3333", "ATFI retry failed: " + fi2.trimmed());
+                        (*keyIdx)++;
+                        QTimer::singleShot(500, *tryKey);
+                        return;
+                    }
+                    // Continue with 81
+                    m_elm->sendCommand("81", [this, log, done, keys, keyIdx, keyFound, tryKey, k](const QString &) {
+                    m_elm->sendCommand("27 01", [this, log, done, keys, keyIdx, keyFound, tryKey, k](const QString &seed) {
+                        log("#60b8a0", "Seed: " + seed.trimmed());
+                        // Send OUR key directly - no CD 46!
+                        QString keyCmd = QString("27 02 %1 %2")
+                            .arg(k.hi, 2, 16, QChar('0')).arg(k.lo, 2, 16, QChar('0')).toUpper();
+                        m_elm->sendCommand(keyCmd, [this, log, keys, keyIdx, keyFound, tryKey, k](const QString &resp) {
+                            if (resp.contains("67 02", Qt::CaseInsensitive)) {
+                                log("#00ff00", QString("*** KEY FOUND! %1 = %2 %3 ***")
+                                    .arg(k.name).arg(k.hi, 2, 16, QChar('0')).arg(k.lo, 2, 16, QChar('0')));
+                                *keyFound = true;
+                                log("#00ffcc", "--- Security Unlocked! Reading protected data ---");
+                                m_elm->sendCommand("30 10 07 00 02", [this, log, tryKey](const QString &rio) {
+                                    log("#00ff88", "IOCtrl 30 10 07 00 02: " + rio.trimmed());
+                                    m_elm->sendCommand("21 62", [this, log, tryKey](const QString &r62) {
+                                        log("#00ff88", "Block 0x62: " + r62.trimmed());
+                                        m_elm->sendCommand("3B 90", [this, log, tryKey](const QString &r3b) {
+                                            log("#00ff88", "Adaptation 3B 90: " + r3b.trimmed());
+                                            (*tryKey)();
+                                        });
+                                    });
+                                });
+                            } else {
+                                QString nrc = "rejected";
+                                if (resp.contains("35")) nrc = "invalidKey (0x35)";
+                                else if (resp.contains("36")) nrc = "exceededAttempts (0x36)";
+                                else if (resp.contains("37")) nrc = "timeDelayNotExpired (0x37)";
+                                else if (resp.contains("79")) nrc = "responsePending (0x79)";
+                                log("#ff8800", QString("Key %1 %2: %3 | raw: %4")
+                                    .arg(k.hi, 2, 16, QChar('0')).arg(k.lo, 2, 16, QChar('0'))
+                                    .arg(nrc, resp.trimmed()));
+                                int waitTime = 1000;
+                                if (resp.contains("36") || resp.contains("37")) waitTime = 10000;
+                                (*keyIdx)++;
+                                QTimer::singleShot(waitTime, *tryKey);
+                            }
+                        });
+                    });
+                    });
+                });
+                return;
+            }
+            // ATFI OK - continue
+            m_elm->sendCommand("81", [this, log, done, keys, keyIdx, keyFound, tryKey, k](const QString &) {
+            m_elm->sendCommand("27 01", [this, log, done, keys, keyIdx, keyFound, tryKey, k](const QString &seed) {
+                log("#60b8a0", "Seed: " + seed.trimmed());
+                QString keyCmd = QString("27 02 %1 %2")
+                    .arg(k.hi, 2, 16, QChar('0')).arg(k.lo, 2, 16, QChar('0')).toUpper();
+                m_elm->sendCommand(keyCmd, [this, log, keys, keyIdx, keyFound, tryKey, k](const QString &resp) {
+                    if (resp.contains("67 02", Qt::CaseInsensitive)) {
+                        log("#00ff00", QString("*** KEY FOUND! %1 = %2 %3 ***")
+                            .arg(k.name).arg(k.hi, 2, 16, QChar('0')).arg(k.lo, 2, 16, QChar('0')));
+                        *keyFound = true;
+                        log("#00ffcc", "--- Security Unlocked! Reading protected data ---");
+                        m_elm->sendCommand("30 10 07 00 02", [this, log, tryKey](const QString &rio) {
+                            log("#00ff88", "IOCtrl 30 10 07 00 02: " + rio.trimmed());
+                            m_elm->sendCommand("21 62", [this, log, tryKey](const QString &r62) {
+                                log("#00ff88", "Block 0x62: " + r62.trimmed());
+                                m_elm->sendCommand("3B 90", [this, log, tryKey](const QString &r3b) {
+                                    log("#00ff88", "Adaptation 3B 90: " + r3b.trimmed());
+                                    (*tryKey)();
+                                });
+                            });
+                        });
+                    } else {
+                        QString nrc = "rejected";
+                        if (resp.contains("35")) nrc = "invalidKey (0x35)";
+                        else if (resp.contains("36")) nrc = "exceededAttempts (0x36)";
+                        else if (resp.contains("37")) nrc = "timeDelayNotExpired (0x37)";
+                        else if (resp.contains("79")) nrc = "responsePending (0x79)";
+                        log("#ff8800", QString("Key %1 %2: %3 | raw: %4")
+                            .arg(k.hi, 2, 16, QChar('0')).arg(k.lo, 2, 16, QChar('0'))
+                            .arg(nrc, resp.trimmed()));
+                        int waitTime = 1000;
+                        if (resp.contains("36") || resp.contains("37")) waitTime = 10000;
+                        (*keyIdx)++;
+                        QTimer::singleShot(waitTime, *tryKey);
+                    }
+                });
+            });
+            });
+        });
+        });
+        });
+        });
+        });
+        });
         });
     };
 
-    m_logText->append("<font color='white'>========== FINAL TEST v5 ==========</font>");
-    log("#ffff00", "Motor CALISIYOR olmali! Fren basili!");
+    (*tryKey)();
+}
 
-    auto steps = std::make_shared<QList<std::pair<QString, int>>>();
-    steps->append({"===TCM", 0});
-    steps->append({"P-1", 1000}); steps->append({"P-2", 500});
-    steps->append({"===R", 5000});
-    steps->append({"R-1", 500}); steps->append({"R-2", 500});
-    steps->append({"===N", 5000});
-    steps->append({"N-1", 500}); steps->append({"N-2", 500});
-    steps->append({"===D", 5000});
-    steps->append({"D-1", 500}); steps->append({"D-2", 500});
-    steps->append({"===P2", 5000});
-    steps->append({"P-fin", 500});
-    steps->append({"===DTC_TCM", 500});
-    steps->append({"===DTC_ECU", 500});
-    steps->append({"===DTC_ABS", 500});
-    steps->append({"===DTC_CLEAR_TCM", 500});
-    steps->append({"===DONE", 500});
+
+// --- Test v7: Discovery Phases (sequential command runner) ---
+void MainWindow::runDiscoveryPhases(
+    std::function<void(const QString&, const QString&)> log,
+    std::function<void()> done)
+{
+    struct Step {
+        QString label;   // display label
+        QString action;  // "cmd:XX XX" or "switch:tcm" or "switch:ecu" or "switch:j1850" or "header:text" or "j1850cmd:XX"
+    };
+
+    auto steps = std::make_shared<QList<Step>>();
+
+    // --- Phase 2: TCM Block Discovery ---
+    steps->append(Step{"", "header:--- Phase 2: TCM Block Discovery ---"});
+    steps->append(Step{"", "switch:tcm"});
+    steps->append(Step{"TCM 0x30", "cmd:21 30"});
+    steps->append(Step{"TCM 0x50", "cmd:21 50"});
+    steps->append(Step{"TCM 0x60", "cmd:21 60"});
+    steps->append(Step{"TCM 0x70", "cmd:21 70"});
+    steps->append(Step{"TCM 0x80", "cmd:21 80"});
+    steps->append(Step{"TCM 0x90", "cmd:21 90"});
+    steps->append(Step{"TCM 0xA0", "cmd:21 A0"});
+    steps->append(Step{"TCM 0xB0", "cmd:21 B0"});
+    steps->append(Step{"TCM 0xC0", "cmd:21 C0"});
+    steps->append(Step{"TCM 0xE0", "cmd:21 E0"});
+    steps->append(Step{"TCM 0xE1", "cmd:21 E1"});
+    steps->append(Step{"TCM 0xE2", "cmd:21 E2"});
+    steps->append(Step{"TCM 1A 86", "cmd:1A 86"});
+    steps->append(Step{"TCM 1A 87", "cmd:1A 87"});
+    steps->append(Step{"TCM IOCtrl", "cmd:30 10 07 00 02"});
+
+    // --- Phase 3: ECU Block Discovery ---
+    steps->append(Step{"", "header:--- Phase 3: ECU Block Discovery ---"});
+    steps->append(Step{"", "switch:ecu"});
+    steps->append(Step{"ECU 0x10", "cmd:21 10"});
+    steps->append(Step{"ECU 0x14", "cmd:21 14"});
+    steps->append(Step{"ECU 0x16", "cmd:21 16"});
+    steps->append(Step{"ECU 0x18", "cmd:21 18"});
+    steps->append(Step{"ECU 0x1A", "cmd:21 1A"});
+    steps->append(Step{"ECU 0x1C", "cmd:21 1C"});
+    steps->append(Step{"ECU 0x1E", "cmd:21 1E"});
+    steps->append(Step{"ECU 0x24", "cmd:21 24"});
+    steps->append(Step{"ECU 0x26", "cmd:21 26"});
+    steps->append(Step{"ECU 0x30", "cmd:21 30"});
+    steps->append(Step{"ECU 0x40", "cmd:21 40"});
+    steps->append(Step{"ECU 0x50", "cmd:21 50"});
+    steps->append(Step{"ECU 1A 86", "cmd:1A 86"});
+    steps->append(Step{"ECU 1A 87", "cmd:1A 87"});
+    steps->append(Step{"ECU 1A 90", "cmd:1A 90"});
+
+    // --- Phase 4: ECU Security Key (EGS52 algo) ---
+    steps->append(Step{"", "header:--- Phase 4: ECU Security Key ---"});
+    steps->append(Step{"", "switch:ecu_sectest"});
+
+    // --- Phase 5: J1850 Discovery ---
+    steps->append(Step{"", "header:--- Phase 5: J1850 Discovery ---"});
+    steps->append(Step{"", "switch:j1850"});
+    // ABS extra PIDs
+    steps->append(Step{"ABS PID 00", "j1850cmd:24 00 00"});
+    steps->append(Step{"ABS PID 01", "j1850cmd:24 01 00"});
+    steps->append(Step{"ABS PID 02", "j1850cmd:24 02 00"});
+    steps->append(Step{"ABS PID 07", "j1850cmd:24 07 00"});
+    steps->append(Step{"ABS PID 08", "j1850cmd:24 08 00"});
+    // Airbag
+    steps->append(Step{"", "header:Airbag DTC..."});
+    steps->append(Step{"", "j1850hdr:ATSH246022"});
+    steps->append(Step{"", "j1850hdr:ATRA60"});
+    steps->append(Step{"Airbag PID 00", "j1850cmd:28 37 00"});
+    // J1850 TCM (0x28) - unlikely to respond on 2.7 CRD
+    steps->append(Step{"", "header:J1850 TCM (0x28) test..."});
+    steps->append(Step{"", "j1850hdr:ATSH242822"});
+    steps->append(Step{"", "j1850hdr:ATRA28"});
+    steps->append(Step{"J1850 TCM", "j1850cmd:2E 00 00"});
+
+    // --- Done ---
+    steps->append(Step{"", "header:--- Battery ---"});
+    steps->append(Step{"Battery", "cmd:ATRV"});
 
     auto idx = std::make_shared<int>(0);
-    auto runStep = std::make_shared<std::function<void()>>();
+    auto run = std::make_shared<std::function<void()>>();
 
-    *runStep = [this, steps, idx, runStep, read30, log]() {
+    *run = [this, steps, idx, run, log, done]() {
         if (*idx >= steps->size()) {
-            m_rawDumpBtn->setEnabled(true); m_rawDumpBtn->setText("Raw Data Read");
+            m_logText->append("<font color='white'>========== TEST v7 BITTI ==========</font>");
+            log("#ffff00", "COPY LOG ile kopyala!");
+            done();
             return;
         }
-        QString label = steps->at(*idx).first;
-        int wait = steps->at(*idx).second;
+
+        auto &step = steps->at(*idx);
         (*idx)++;
 
-        if (label == "===TCM") {
-            log("#00ffcc", "--- Phase 1: TCM Live Data (P/R/N/D) ---");
-            m_tcm->switchToModule(WJDiagnostics::Module::KLineTCM, [this, log, runStep](bool ok) {
-                log(ok ? "#00ff88" : "#ff3333", ok ? "TCM OK" : "TCM FAIL");
-                if (!ok) { m_rawDumpBtn->setEnabled(true); m_rawDumpBtn->setText("Raw Data Read"); return; }
-                (*runStep)();
-            });
+        if (step.action.startsWith("header:")) {
+            log("#00ffcc", step.action.mid(7));
+            (*run)();
             return;
         }
-        if (label == "===R")  { log("#ff8800", ">> R'ye AL - 5sn bekle <<"); QTimer::singleShot(wait, *runStep); return; }
-        if (label == "===N")  { log("#ff8800", ">> N'ye AL - 5sn bekle <<"); QTimer::singleShot(wait, *runStep); return; }
-        if (label == "===D")  { log("#ff8800", ">> D'ye AL (fren!) - 5sn bekle <<"); QTimer::singleShot(wait, *runStep); return; }
-        if (label == "===P2") { log("#ff8800", ">> Tekrar P'ye AL - 5sn bekle <<"); QTimer::singleShot(wait, *runStep); return; }
 
-        if (label == "===DTC_TCM") {
-            log("#00ffcc", "--- Phase 2: DTC Read/Clear ---");
-            log("#00ffcc", "TCM DTC okuma...");
-            m_tcm->readDTCs(WJDiagnostics::Module::KLineTCM,
-                [this, log, runStep](const QList<WJDiagnostics::DTCEntry> &dtcs) {
-                if (dtcs.isEmpty()) log("#00ff88", "TCM: 0 DTC (temiz)");
-                for (const auto &d : dtcs)
-                    log("#ffff00", QString("TCM: %1 %2 [%3]").arg(d.code, d.description, d.isActive?"AKTIF":"kayitli"));
-                (*runStep)();
+        if (step.action == "switch:tcm") {
+            m_tcm->switchToModule(WJDiagnostics::Module::KLineTCM, [this, log, run](bool ok) {
+                log(ok ? "#60b8a0" : "#ff3333", ok ? "TCM OK" : "TCM FAIL");
+                (*run)();
             });
             return;
         }
-        if (label == "===DTC_ECU") {
-            log("#00ffcc", "ECU DTC okuma...");
-            m_tcm->readDTCs(WJDiagnostics::Module::MotorECU,
-                [this, log, runStep](const QList<WJDiagnostics::DTCEntry> &dtcs) {
-                if (dtcs.isEmpty()) log("#00ff88", "ECU: 0 DTC (temiz)");
-                for (const auto &d : dtcs)
-                    log("#ffff00", QString("ECU: %1 %2 [%3]").arg(d.code, d.description, d.isActive?"AKTIF":"kayitli"));
-                (*runStep)();
+
+        if (step.action == "switch:ecu") {
+            m_tcm->switchToModule(WJDiagnostics::Module::MotorECU, [this, log, run](bool ok) {
+                log(ok ? "#60b8a0" : "#ff3333", ok ? "ECU OK" : "ECU FAIL");
+                (*run)();
             });
             return;
         }
-        if (label == "===DTC_ABS") {
-            log("#00ffcc", "ABS DTC okuma (J1850)...");
-            m_tcm->readDTCs(WJDiagnostics::Module::ABS,
-                [this, log, runStep](const QList<WJDiagnostics::DTCEntry> &dtcs) {
-                if (dtcs.isEmpty()) log("#00ff88", "ABS: 0 DTC veya raw response");
-                for (const auto &d : dtcs)
-                    log("#ffff00", QString("ABS: %1 %2").arg(d.code, d.description));
-                (*runStep)();
-            });
-            return;
-        }
-        if (label == "===DTC_CLEAR_TCM") {
-            log("#00ffcc", "TCM DTC silme (14 00 00)...");
-            m_tcm->clearDTCs(WJDiagnostics::Module::KLineTCM, [this, log, runStep](bool ok) {
-                log(ok ? "#00ff88" : "#ff3333", ok ? "TCM clear: OK" : "TCM clear: FAIL");
-                log("#00ffcc", "TCM DTC tekrar okuma (dogrulama)...");
-                m_tcm->readDTCs(WJDiagnostics::Module::KLineTCM,
-                    [this, log, runStep](const QList<WJDiagnostics::DTCEntry> &dtcs) {
-                    log("#60b8a0", QString("TCM verify: %1 DTC").arg(dtcs.size()));
-                    (*runStep)();
+
+        if (step.action == "switch:ecu_sectest") {
+            // ECU security: get seed, compute EGS52 key, try it
+            m_tcm->switchToModule(WJDiagnostics::Module::MotorECU, [this, log, run](bool ok) {
+                if (!ok) { log("#ff3333", "ECU switch FAIL"); (*run)(); return; }
+                // Seed already received during switchToModule, extract from log
+                // Send 27 01 again to get fresh seed
+                m_elm->sendCommand("27 01", [this, log, run](const QString &seedResp) {
+                    log("#60b8a0", "ECU seed: " + seedResp.trimmed());
+                    // Parse seed bytes from "84 F1 15 67 01 XX YY ZZ"
+                    QStringList parts = seedResp.trimmed().split(' ');
+                    if (parts.size() >= 8 && parts[3] == "67") {
+                        bool ok1, ok2;
+                        uint8_t s0 = parts[5].toUInt(&ok1, 16);
+                        uint8_t s1 = parts[6].toUInt(&ok2, 16);
+                        if (ok1 && ok2) {
+                            uint16_t seed16 = (s0 << 8) | s1;
+                            uint16_t r = ((seed16 << 8) & 0xFFFF) | (seed16 >> 8);
+                            r ^= 0x5AA5;
+                            r = (uint16_t)((uint32_t)r * 0x5AA5 & 0xFFFF);
+                            QString keyCmd = QString("27 02 %1 %2")
+                                .arg((r >> 8), 2, 16, QChar('0'))
+                                .arg((r & 0xFF), 2, 16, QChar('0')).toUpper();
+                            log("#c080ff", QString("ECU key calc: seed=%1 -> key=%2")
+                                .arg(seed16, 4, 16, QChar('0'))
+                                .arg(r, 4, 16, QChar('0')));
+                            m_elm->sendCommand(keyCmd, [this, log, run](const QString &keyResp) {
+                                if (keyResp.contains("67 02", Qt::CaseInsensitive)) {
+                                    log("#00ff00", "*** ECU SECURITY UNLOCKED! ***");
+                                    // Read protected blocks
+                                    m_elm->sendCommand("21 62", [this, log, run](const QString &r62) {
+                                        log("#00ff88", "ECU 0x62 (protected): " + r62.trimmed());
+                                        m_elm->sendCommand("21 B0", [this, log, run](const QString &rB0) {
+                                            log("#00ff88", "ECU 0xB0 (protected): " + rB0.trimmed());
+                                            (*run)();
+                                        });
+                                    });
+                                } else {
+                                    log("#ff8800", "ECU key rejected: " + keyResp.trimmed());
+                                    (*run)();
+                                }
+                            });
+                        } else {
+                            log("#ff8800", "ECU seed parse fail");
+                            (*run)();
+                        }
+                    } else {
+                        // Seed might be NRC 0x37 (already attempted during switchToModule)
+                        log("#ff8800", "ECU seed: " + seedResp.trimmed());
+                        (*run)();
+                    }
                 });
             });
             return;
         }
-        if (label == "===DONE") {
-            m_elm->sendCommand("ATRV", [this, log](const QString &rv) {
-                log("#60b8a0", "Battery: " + rv.trimmed());
-                m_logText->append("<font color='white'>========== TEST v5 BITTI ==========</font>");
-                log("#ffff00", "COPY LOG ile kopyala!");
-                m_rawDumpBtn->setEnabled(true); m_rawDumpBtn->setText("Raw Data Read");
+
+        if (step.action == "switch:j1850") {
+            // Full J1850 init: ATZ -> ATE1 -> ATH1 -> ATSP2 -> ATSH244022 -> ATRA40
+            m_elm->sendCommand("ATZ", [this, log, run](const QString &) {
+            m_elm->sendCommand("ATE1", [this, log, run](const QString &) {
+            m_elm->sendCommand("ATH1", [this, log, run](const QString &) {
+            m_elm->sendCommand("ATIFR0", [this, log, run](const QString &) {
+            m_elm->sendCommand("ATSP2", [this, log, run](const QString &) {
+            m_elm->sendCommand("ATSH244022", [this, log, run](const QString &) {
+            m_elm->sendCommand("ATRA40", [this, log, run](const QString &) {
+                log("#60b8a0", "J1850 ABS ready");
+                (*run)();
+            });
+            });
+            });
+            });
+            });
+            });
             });
             return;
         }
 
-        QTimer::singleShot(wait, [read30, label, runStep]() {
-            (*read30)(label, [runStep]() { (*runStep)(); });
-        });
+        if (step.action.startsWith("j1850hdr:")) {
+            QString hdr = step.action.mid(9);
+            m_elm->sendCommand(hdr, [this, log, run, hdr](const QString &resp) {
+                log("#60b8a0", hdr + ": " + resp.trimmed());
+                (*run)();
+            });
+            return;
+        }
+
+        if (step.action.startsWith("j1850cmd:")) {
+            QString cmd = step.action.mid(9);
+            m_elm->sendCommand(cmd, [this, log, run, step](const QString &resp) {
+                log("#60b8a0", step.label + ": " + resp.trimmed());
+                (*run)();
+            });
+            return;
+        }
+
+        if (step.action.startsWith("cmd:")) {
+            QString cmd = step.action.mid(4);
+            m_elm->sendCommand(cmd, [this, log, run, step](const QString &resp) {
+                log("#60b8a0", step.label + ": " + resp.trimmed());
+                (*run)();
+            });
+            return;
+        }
+
+        // Unknown action, skip
+        (*run)();
     };
 
-    (*runStep)();
+    (*run)();
 }
-
-void MainWindow::phase2_ExtraBlocks(
-    std::function<void(const QString&, const QString&)> logRaw)
-{ (void)logRaw; }
 
 void MainWindow::onRawSendCustom()
 {
