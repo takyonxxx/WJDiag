@@ -887,26 +887,35 @@ void MainWindow::sendWindowCmd(const QString &label, const QString &relayCmd, bo
     }
     if (m_ctrlStatusLabel) m_ctrlStatusLabel->setText(label + (on ? " ON..." : " OFF..."));
 
-    // Extract receive address from header: ATSH24XX2F -> ATRAXX
-    // hdr format: "ATSH24402F" -> target byte at pos 6..7 = "40"
-    QString targetHex = hdr.mid(6, 2);  // "40", "A0", "80"
-    QString atra = "ATRA" + targetHex;
-
-    // Set protocol, header, and receive filter — then send command
-    m_elm->sendCommand("ATSP2", [this, hdr, atra, label, relayCmd, on](const QString &) {
-    m_elm->sendCommand(hdr, [this, atra, label, relayCmd, on](const QString &) {
-    m_elm->sendCommand(atra, [this, label, relayCmd, on](const QString &) {
+    auto sendRelay = [this, label, relayCmd, on]() {
         m_elm->sendCommand(relayCmd, [this, label, on](const QString &resp) {
             bool ok = !resp.contains("NO DATA") && !resp.contains("ERROR");
             QString status = label + (on ? " ON: " : " OFF: ") + (ok ? "OK" : "FAIL");
             if (m_ctrlStatusLabel) m_ctrlStatusLabel->setText(status);
             onLogMessage(status + " -> " + resp.trimmed());
-
-            if (!on) {
-                m_elm->sendCommand("3A 02 FF", [](const QString &) {});
-            }
         }, 2000);
-    });});});
+    };
+
+    // Fast path: header already set + session active, just send relay command
+    if (m_ctrlActiveHdr == hdr) {
+        sendRelay();
+        return;
+    }
+
+    m_ctrlActiveHdr = hdr;
+    QString targetHex = hdr.mid(6, 2);  // "40", "A0"
+    QString sessionHdr = "ATSH24" + targetHex + "11";  // mode 0x11 = DiagSession
+    QString atra = "ATRA" + targetHex;
+
+    // Full init: ATSP2 -> DiagSession(0x11) -> ATRA -> 01 01 00 -> IOControl(0x2F) -> relay
+    m_elm->sendCommand("ATSP2", [this, sessionHdr, atra, hdr, sendRelay](const QString &) {
+    m_elm->sendCommand(sessionHdr, [this, atra, hdr, sendRelay](const QString &) {
+    m_elm->sendCommand(atra, [this, hdr, sendRelay](const QString &) {
+    m_elm->sendCommand("01 01 00", [this, hdr, sendRelay](const QString &resp) {
+        onLogMessage("DiagSession: " + resp.trimmed());
+    m_elm->sendCommand(hdr, [sendRelay](const QString &) {
+        sendRelay();
+    });});});});});
 }
 
 QWidget* MainWindow::createControlsTab()
@@ -930,9 +939,23 @@ QWidget* MainWindow::createControlsTab()
             "border-radius:8px;font-size:14px;font-weight:bold;padding:8px;}"
             "QPushButton:pressed{background:#00806a;border-color:#00d4b4;}");
         connect(btn, &QPushButton::pressed, this, [this, label, onCmd, hdr]() {
+            // Send first ON immediately
             sendWindowCmd(label, onCmd, true, hdr);
+            // Start repeating ON every 400ms while held
+            if (!m_ctrlRepeatTimer) {
+                m_ctrlRepeatTimer = new QTimer(this);
+                m_ctrlRepeatTimer->setTimerType(Qt::PreciseTimer);
+            }
+            m_ctrlRepeatTimer->disconnect();
+            connect(m_ctrlRepeatTimer, &QTimer::timeout, this, [this, label, onCmd, hdr]() {
+                sendWindowCmd(label, onCmd, true, hdr);
+            });
+            m_ctrlRepeatTimer->start(400);
         });
         connect(btn, &QPushButton::released, this, [this, label, offCmd, hdr]() {
+            // Stop repeat timer
+            if (m_ctrlRepeatTimer) m_ctrlRepeatTimer->stop();
+            // Send OFF
             sendWindowCmd(label, offCmd, false, hdr);
         });
         return btn;
@@ -981,12 +1004,14 @@ QWidget* MainWindow::createControlsTab()
     winRow->addWidget(rightGrp);
     lay->addLayout(winRow);
 
-    // ====== DOOR LOCK — DriverDoor 0x40 (triggers hazard flash + horn chirp) ======
-    QGroupBox *lockGrp = new QGroupBox("Door Lock");
-    lockGrp->setStyleSheet(grpStyle);
-    QHBoxLayout *lockLay = new QHBoxLayout(lockGrp);
-    lockLay->setSpacing(6); lockLay->setContentsMargins(4,4,4,4);
+    // ====== BODY CONTROLS ======
+    QString hdrBCM = "ATSH24802F";
+    QGroupBox *bodyGrp = new QGroupBox("Body Controls");
+    bodyGrp->setStyleSheet(grpStyle);
+    QGridLayout *bodyLay = new QGridLayout(bodyGrp);
+    bodyLay->setSpacing(6); bodyLay->setContentsMargins(4,4,4,4);
 
+    // LOCK — DriverDoor 0x40 (triggers hazard flash + horn chirp)
     QPushButton *lockBtn = new QPushButton("LOCK");
     lockBtn->setMinimumHeight(60);
     lockBtn->setStyleSheet(
@@ -1000,6 +1025,7 @@ QWidget* MainWindow::createControlsTab()
         });
     });
 
+    // UNLOCK — DriverDoor 0x40
     QPushButton *unlockBtn = new QPushButton("UNLOCK");
     unlockBtn->setMinimumHeight(60);
     unlockBtn->setStyleSheet(
@@ -1010,9 +1036,27 @@ QWidget* MainWindow::createControlsTab()
         sendWindowCmd("Unlock", "3A 02 FF", true, hdrDD);
     });
 
-    lockLay->addWidget(lockBtn);
-    lockLay->addWidget(unlockBtn);
-    lay->addWidget(lockGrp);
+    // HAZARD — BCM 0x80 mode 0x2F: 38 01 00 ON / 38 01 01 OFF
+    QPushButton *hazardBtn = new QPushButton("HAZARD\nOFF");
+    hazardBtn->setMinimumHeight(60);
+    hazardBtn->setCheckable(true);
+    hazardBtn->setStyleSheet(
+        "QPushButton{background:#1a3050;color:#e0e0e0;border:1px solid #2a5070;"
+        "border-radius:8px;font-size:13px;font-weight:bold;padding:8px;}"
+        "QPushButton:checked{background:#802020;color:#ff4444;border-color:#ff4444;}");
+    connect(hazardBtn, &QPushButton::toggled, this, [this, hazardBtn, hdrBCM](bool on) {
+        hazardBtn->setText(on ? "HAZARD\nON" : "HAZARD\nOFF");
+        sendWindowCmd("Hazard", on ? "38 01 00" : "38 01 01", on, hdrBCM);
+    });
+
+    // HORN — BCM 0x80 mode 0x2F: 38 00 CC ON / 38 00 00 OFF (hold)
+    bodyLay->addWidget(makeHoldBtn("HORN", "38 00 CC", "38 00 00", "Horn", hdrBCM), 0, 1);
+
+    bodyLay->addWidget(lockBtn, 0, 0);
+    bodyLay->addWidget(unlockBtn, 1, 0);
+    bodyLay->addWidget(hazardBtn, 1, 1);
+
+    lay->addWidget(bodyGrp);
 
     lay->addStretch();
     return w;
@@ -1268,6 +1312,7 @@ void MainWindow::onClearDTCs()
 
 void MainWindow::onStartLiveData()
 {
+    m_ctrlActiveHdr.clear();  // invalidate controls header cache
     // Selectili parametreleri topla
     QList<uint8_t> selected;
     auto params = m_tcm->liveDataParams();
@@ -1529,7 +1574,7 @@ void MainWindow::onRawBusDump()
         m_rawDumpBtn->setText("Raw Data Read");
     };
 
-    m_logText->append("<font color='white'>========== TEST v14 ==========</font>");
+    m_logText->append("<font color='white'>========== WINDOW TEST ==========</font>");
     runDiscoveryPhases(log, done);
 }
 
@@ -1541,7 +1586,88 @@ void MainWindow::runDiscoveryPhases(
     auto steps = std::make_shared<QList<Step>>();
 
     // =================================================================
-    // PHASE 1: ECU Security — ArvutaKoodi + protected + all blocks
+    // QUICK WINDOW TEST — with DiagnosticSession activation
+    // APK sends ATSH244011 -> 01 01 00 before IOControl commands
+    // Without this, relay returns OK but doesn't physically activate
+    // =================================================================
+    steps->append(Step{"", "switch:j1850"});
+
+    // --- Left Window (DriverDoor 0x40) ---
+    steps->append(Step{"", "header:--- Left Window (DD 0x40 + session) ---"});
+    // Step 1: Activate diagnostic session on DriverDoor
+    steps->append(Step{"", "j1850hdr:ATSH244011"});
+    steps->append(Step{"", "j1850hdr:ATRA40"});
+    steps->append(Step{"DD Session",    "j1850cmd:01 01 00"});
+    // Step 2: IOControl relay commands
+    steps->append(Step{"", "j1850hdr:ATSH24402F"});
+    steps->append(Step{"L-WinUp ON 1",  "j1850cmd:38 07 01"});
+    steps->append(Step{"L-WinUp ON 2",  "j1850cmd:38 07 01"});
+    steps->append(Step{"L-WinUp ON 3",  "j1850cmd:38 07 01"});
+    steps->append(Step{"L-WinUp ON 4",  "j1850cmd:38 07 01"});
+    steps->append(Step{"L-WinUp ON 5",  "j1850cmd:38 07 01"});
+    steps->append(Step{"L-WinUp ON 6",  "j1850cmd:38 07 01"});
+    steps->append(Step{"L-WinUp ON 7",  "j1850cmd:38 07 01"});
+    steps->append(Step{"L-WinUp ON 8",  "j1850cmd:38 07 01"});
+    steps->append(Step{"L-WinUp ON 9",  "j1850cmd:38 07 01"});
+    steps->append(Step{"L-WinUp ON 10", "j1850cmd:38 07 01"});
+    steps->append(Step{"L-WinUp OFF",   "j1850cmd:38 07 00"});
+    // Down
+    steps->append(Step{"L-WinDn ON 1",  "j1850cmd:38 08 01"});
+    steps->append(Step{"L-WinDn ON 2",  "j1850cmd:38 08 01"});
+    steps->append(Step{"L-WinDn ON 3",  "j1850cmd:38 08 01"});
+    steps->append(Step{"L-WinDn ON 4",  "j1850cmd:38 08 01"});
+    steps->append(Step{"L-WinDn ON 5",  "j1850cmd:38 08 01"});
+    steps->append(Step{"L-WinDn ON 6",  "j1850cmd:38 08 01"});
+    steps->append(Step{"L-WinDn ON 7",  "j1850cmd:38 08 01"});
+    steps->append(Step{"L-WinDn ON 8",  "j1850cmd:38 08 01"});
+    steps->append(Step{"L-WinDn ON 9",  "j1850cmd:38 08 01"});
+    steps->append(Step{"L-WinDn ON 10", "j1850cmd:38 08 01"});
+    steps->append(Step{"L-WinDn OFF",   "j1850cmd:38 08 00"});
+    steps->append(Step{"DD Release",    "j1850cmd:3A 02 FF"});
+
+    // --- Right Window (PassengerDoor 0xA0) ---
+    steps->append(Step{"", "header:--- Right Window (PD 0xA0 + session) ---"});
+    steps->append(Step{"", "j1850hdr:ATSH24A011"});
+    steps->append(Step{"", "j1850hdr:ATRAA0"});
+    steps->append(Step{"PD Session",    "j1850cmd:01 01 00"});
+    steps->append(Step{"", "j1850hdr:ATSH24A02F"});
+    steps->append(Step{"R-WinUp ON 1",  "j1850cmd:38 01 12"});
+    steps->append(Step{"R-WinUp ON 2",  "j1850cmd:38 01 12"});
+    steps->append(Step{"R-WinUp ON 3",  "j1850cmd:38 01 12"});
+    steps->append(Step{"R-WinUp ON 4",  "j1850cmd:38 01 12"});
+    steps->append(Step{"R-WinUp ON 5",  "j1850cmd:38 01 12"});
+    steps->append(Step{"R-WinUp OFF",   "j1850cmd:38 01 00"});
+    steps->append(Step{"R-WinDn ON 1",  "j1850cmd:38 00 12"});
+    steps->append(Step{"R-WinDn ON 2",  "j1850cmd:38 00 12"});
+    steps->append(Step{"R-WinDn ON 3",  "j1850cmd:38 00 12"});
+    steps->append(Step{"R-WinDn ON 4",  "j1850cmd:38 00 12"});
+    steps->append(Step{"R-WinDn ON 5",  "j1850cmd:38 00 12"});
+    steps->append(Step{"R-WinDn OFF",   "j1850cmd:38 00 00"});
+    steps->append(Step{"PD Release",    "j1850cmd:3A 02 FF"});
+
+    // --- Body Controls (DD lock + BCM hazard/horn with DiagSession) ---
+    steps->append(Step{"", "header:--- Body Controls ---"});
+    // Lock via DriverDoor (session already active from window test)
+    steps->append(Step{"", "j1850hdr:ATSH24402F"});
+    steps->append(Step{"DD Lock ON",    "j1850cmd:38 06 02"});
+    steps->append(Step{"DD Lock OFF",   "j1850cmd:38 06 00"});
+    steps->append(Step{"DD Unlock",     "j1850cmd:3A 02 FF"});
+    // BCM 0x80 with DiagSession — test if session fixes NO DATA
+    steps->append(Step{"", "j1850hdr:ATSH248011"});
+    steps->append(Step{"", "j1850hdr:ATRA80"});
+    steps->append(Step{"BCM Session",   "j1850cmd:01 01 00"});
+    steps->append(Step{"", "j1850hdr:ATSH24802F"});
+    steps->append(Step{"BCM Horn ON",   "j1850cmd:38 00 CC"});
+    steps->append(Step{"BCM Horn OFF",  "j1850cmd:38 00 00"});
+    steps->append(Step{"BCM Hazard ON", "j1850cmd:38 01 00"});
+    steps->append(Step{"BCM Hazard OFF","j1850cmd:38 01 01"});
+
+    steps->append(Step{"", "header:--- Final ---"});
+    steps->append(Step{"Battery", "cmd:ATRV"});
+
+#if 0
+    // =================================================================
+    // FULL TEST v14 — disabled for quick window test
     // =================================================================
     steps->append(Step{"", "header:=== Phase 1: ECU ArvutaKoodi + blocks ==="});
     steps->append(Step{"", "switch:ecu_arvuta"});
@@ -1844,10 +1970,7 @@ void MainWindow::runDiscoveryPhases(
 
     // NOTE: BCM 0x80 mode 0x2F returned NO DATA in v14 test
     // Hazard flash + horn chirp triggered by DD Lock relay (38 06 02)
-
-    // Final
-    steps->append(Step{"", "header:--- Final ---"});
-    steps->append(Step{"Battery", "cmd:ATRV"});
+#endif
 
     // =================================================================
     // STEP RUNNER

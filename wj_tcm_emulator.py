@@ -418,6 +418,46 @@ class ELM327Emulator:
         mode = self.header_mode
         self.state.tick()
 
+        # DiagnosticSessionControl mode (0x11) — REQUIRED before IOControl
+        # APK sends ATSH24XX11 -> 01 01 00 to activate diagnostic session
+        # Without this, relay commands return OK but don't physically activate
+        if mode == 0x11:
+            if t in (0x40, 0xA0):  # DriverDoor / PassengerDoor / ABS (0x40 shared)
+                if sid == 0x01:
+                    if t == 0x40: self.state.abs_dtcs_cleared = True
+                    logging.info(f"DiagSession ON for target 0x{t:02X}")
+                    return f"26 {t:02X} 51 01"  # positive response
+                return f"26 {t:02X} 7F 11 12 00 DD"
+            if t == 0x80:  # BCM — test if session fixes NO DATA
+                if sid == 0x01:
+                    logging.info("BCM DiagSession ON")
+                    return "26 80 51 01"
+                return "NO DATA"
+            # Other modules — DTC clear uses mode 0x11 too
+            if t == 0x60 and sid == 0x0D:
+                self.state.airbag_dtcs_cleared = True; return "26 60 51 0D"
+            if t in (0x90,0x98,0x68) and sid == 0x01:
+                return f"26 {t:02X} 51 01"
+            return "NO DATA"
+
+        # ReadMemoryByAddress mode (0xB4) — window motor current monitoring
+        # APK uses ATSH2440B4 -> 28 07 to read motor current during window test
+        if mode == 0xB4:
+            if t == 0x40:  # DriverDoor
+                if sid == 0x28:
+                    pid = data[0] if data else 0
+                    if pid == 0x07:  # window motor current
+                        return "26 40 E8 07 00 20 DD"  # simulated current
+                    if pid == 0x3F:  # window position/status
+                        return "26 40 E8 3F 00 00 DD"
+                return f"26 40 7F B4 12 00 DD"
+            if t == 0x80:  # BCM mode B4
+                if sid == 0x28:
+                    pid = data[0] if data else 0
+                    return f"26 80 E8 {pid:02X} 00 00 DD"
+                return f"26 80 7F B4 12 00 DD"
+            return "NO DATA"
+
         # IOControlByLocalIdentifier mode (0x2F) — Actuator relay control
         # All responses from real vehicle log (2026-03-11 15:07)
         if mode == 0x2F:
@@ -471,16 +511,6 @@ class ELM327Emulator:
                 return "26 A0 7F 2F 12 00 BC"
             if t == 0x80:  # BCM — NO DATA on EU-spec WJ
                 return "NO DATA"
-            return "NO DATA"
-
-        # ECUReset mode (0x11) — DTC clear
-        if mode == 0x11:
-            if t == 0x40 and sid == 0x01:
-                self.state.abs_dtcs_cleared = True; return "26 40 51 01"
-            if t == 0x60 and sid == 0x0D:
-                self.state.airbag_dtcs_cleared = True; return "26 60 51 0D"
-            if t in (0x80,0x90,0x98,0x68) and sid == 0x01:
-                return f"26 {t:02X} 51 01"
             return "NO DATA"
 
         # ABS (0x40) — SID 0x20 data, 0x24 DTC

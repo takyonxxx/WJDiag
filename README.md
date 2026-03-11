@@ -189,27 +189,51 @@ Verified values from real vehicle:
 
 When switching between ECU (0x15) and TCM (0x20) on the K-Line bus, the ELM327 must perform a full bus reinit (ATZ → ATWM → ATSH → ATSP5 → ATFI → 81 → 27). If the previous session has timed out (no communication for 3-5 seconds), the `3E` (TesterPresent) heartbeat will detect this and trigger a reinit. Response source address is validated: TCM responses contain `F1 20`, ECU responses contain `F1 15`.
 
-### Window & Door Control (Controls tab)
+### Actuator Control (Controls tab)
 
-Actuator relay control via J1850 VPW IOControlByLocalIdentifier.
-Header format: `ATSH24TTMM` where TT=target, MM=mode (0x2F).
-**ATRA filter required** — without `ATRAxx`, ELM327 returns NO DATA.
+J1850 VPW IOControlByLocalIdentifier (mode 0x2F).
+
+**CRITICAL: DiagnosticSession (mode 0x11) must be activated before IOControl.**
+Without `ATSH24XX11` → `01 01 00`, relay commands return positive response but
+the relay does NOT physically activate. This is a DDM safety feature.
 
 ```
-Left (DriverDoor 0x40): ATSH24402F, ATRA40
-  Window UP:    38 07 01 (ON) / 38 07 00 (OFF)   VERIFIED
-  Window DOWN:  38 08 01 (ON) / 38 08 00 (OFF)   VERIFIED
-  Auto-DOWN:    38 08 01 (300ms pulse)
-  Lock:         38 06 02 (ON) / 38 06 00 (OFF)   triggers hazard flash + horn
-  Unlock:       3A 02 FF                          release all relays
-
-Right (PassengerDoor 0xA0): ATSH24A02F, ATRAA0
-  Window UP:    38 01 12 (ON) / 38 01 00 (OFF)   VERIFIED
-  Window DOWN:  38 00 12 (ON) / 38 00 00 (OFF)   VERIFIED
+Full activation sequence:
+  1. ATSP2                       (set J1850 VPW protocol)
+  2. ATSH24XX11                  (DiagSessionControl header, XX=target)
+  3. ATRAxx                      (receive filter)
+  4. 01 01 00                    (activate diagnostic session)
+  5. ATSH24XX2F                  (IOControl header)
+  6. 38 PID VAL                  (relay ON)
+  ...repeat 38 PID VAL while holding button (400ms interval)...
+  7. 38 PID 00                   (relay OFF)
 ```
 
-BCM 0x80 mode 0x2F: **NO DATA** on EU-spec WJ (BCM not on J1850 bus).
-Hazard flash and horn chirp are triggered by DriverDoor Lock relay as confirmation signal.
+**Left (DriverDoor 0x40):**
+```
+  Session:     ATSH244011 -> 01 01 00
+  Window UP:   ATSH24402F -> 38 07 01 (ON) / 38 07 00 (OFF)
+  Window DOWN: ATSH24402F -> 38 08 01 (ON) / 38 08 00 (OFF)
+  Auto-DOWN:   38 08 01 (300ms pulse — triggers express-down)
+  Lock:        38 06 02 (ON) / 38 06 00 (OFF) — triggers hazard + horn
+  Unlock:      3A 02 FF (release all relays)
+```
+
+**Right (PassengerDoor 0xA0):**
+```
+  Session:     ATSH24A011 -> 01 01 00
+  Window UP:   ATSH24A02F -> 38 01 12 (ON) / 38 01 00 (OFF)
+  Window DOWN: ATSH24A02F -> 38 00 12 (ON) / 38 00 00 (OFF)
+```
+
+**Body Controls (BCM 0x80):**
+```
+  Session:     ATSH248011 -> 01 01 00
+  Hazard:      ATSH24802F -> 38 01 00 (ON) / 38 01 01 (OFF)
+  Horn:        ATSH24802F -> 38 00 CC (ON) / 38 00 00 (OFF)
+```
+Note: BCM 0x80 returned NO DATA without DiagSession in earlier tests.
+DiagSession may fix this — pending verification.
 
 ## Architecture
 

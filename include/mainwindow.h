@@ -122,6 +122,8 @@ private:
     QLabel *m_airbagDtcCountLabel=nullptr;
     // Controls tab
     QLabel *m_ctrlStatusLabel=nullptr;
+    QString m_ctrlActiveHdr;  // currently set J1850 header for controls
+    QTimer *m_ctrlRepeatTimer=nullptr;  // repeat ON command while held
     QTextEdit *m_logText;
     QPushButton *m_rawDumpBtn, *m_rawSendBtn;
     QLineEdit *m_rawCmdEdit;
