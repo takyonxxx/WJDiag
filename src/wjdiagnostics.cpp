@@ -28,33 +28,33 @@ QList<WJDiagnostics::ModuleInfo> WJDiagnostics::allModules()
         {Module::KLineTCM, "NAG1 722.6 Transmission (K-Line)", "KL-TCM",
          BusType::KLine, "ATSH8120F1", "ATWM8120F13E", "ATSP5", ""},
 
-        // J1850 VPW modules - verified headers
+        // J1850 VPW modules - headers + ATRA filters
         {Module::TCM, "NAG1 722.6 Transmission (EGS52)", "TCM",
-         BusType::J1850, "ATSH242822", "", "ATSP2", ""},
+         BusType::J1850, "ATSH242822", "", "ATSP2", "ATRA28"},
         {Module::EVIC, "Overhead Console (EVIC)", "EVIC",
-         BusType::J1850, "ATSH242A22", "", "ATSP2", ""},
+         BusType::J1850, "ATSH242A22", "", "ATSP2", "ATRA2A"},
         {Module::ABS, "ABS / ESP Braking", "ABS",
          BusType::J1850, "ATSH244022", "", "ATSP2", "ATRA40"},
         {Module::Airbag, "Airbag (ORC/AOSIM)", "Airbag",
          BusType::J1850, "ATSH246022", "", "ATSP2", "ATRA60"},
         {Module::SKIM, "SKIM Immobilizer", "SKIM",
-         BusType::J1850, "ATSH246222", "", "ATSP2", ""},
+         BusType::J1850, "ATSH246222", "", "ATSP2", "ATRA62"},
         {Module::ATC, "Climate Control (HVAC)", "HVAC",
-         BusType::J1850, "ATSH246822", "", "ATSP2", ""},
+         BusType::J1850, "ATSH246822", "", "ATSP2", "ATRA68"},
         {Module::BCM, "Body Computer (BCM)", "BCM",
          BusType::J1850, "ATSH248022", "", "ATSP2", "ATRA80"},
         {Module::Radio, "Radio / Audio", "Radio",
-         BusType::J1850, "ATSH248722", "", "ATSP2", ""},
+         BusType::J1850, "ATSH248722", "", "ATSP2", "ATRA87"},
         {Module::Cluster, "Instrument Cluster", "Cluster",
-         BusType::J1850, "ATSH249022", "", "ATSP2", ""},
+         BusType::J1850, "ATSH249022", "", "ATSP2", "ATRA90"},
         {Module::MemSeat, "Memory Seat / Mirror", "Seat",
-         BusType::J1850, "ATSH249822", "", "ATSP2", ""},
-        {Module::Liftgate, "Power Liftgate", "Liftgate",
-         BusType::J1850, "ATSH24A022", "", "ATSP2", ""},
-        {Module::HandsFree, "HandsFree / Uconnect", "HFM",
-         BusType::J1850, "ATSH24A122", "", "ATSP2", ""},
-        {Module::ParkAssist, "Park Assist", "Park",
-         BusType::J1850, "ATSH24C022", "", "ATSP2", ""},
+         BusType::J1850, "ATSH249822", "", "ATSP2", "ATRA98"},
+        {Module::Liftgate, "Door Module (0xA0)", "Door",
+         BusType::J1850, "ATSH24A022", "", "ATSP2", "ATRAA0"},
+        {Module::HandsFree, "Liftgate / HandsFree", "HFM",
+         BusType::J1850, "ATSH24A122", "", "ATSP2", "ATRAA1"},
+        {Module::ParkAssist, "VTSS / Park Assist", "VTSS",
+         BusType::J1850, "ATSH24C022", "", "ATSP2", "ATRAC0"},
     };
 }
 
@@ -284,7 +284,7 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                             m_activeModule = targetMod;
                             emit logMessage(QString("Active: %1 | %2").arg(info.shortName, info.atshHeader));
 
-                            // TCM needs DiagSession before data read (verified)
+                            // J1850 DiagSession for modules that need it
                             if (targetMod == Module::TCM) {
                                 m_elm->sendCommand("ATSH242810", [this, done](const QString&) {
                                     QTimer::singleShot(100, this, [this, done]() {
@@ -294,9 +294,29 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                                         } else {
                                             emit logMessage("TCM DiagSession: " + resp);
                                         }
-                                        // Switch back to data read header
                                         QTimer::singleShot(100, this, [this, done]() {
                                         m_elm->sendCommand("ATSH242822", [this, done](const QString&) {
+                                            if (done) done(true);
+                                        });
+                                        });
+                                    });
+                                    });
+                                });
+                            } else if (targetMod == Module::BCM || targetMod == Module::Liftgate ||
+                                       targetMod == Module::Cluster || targetMod == Module::ParkAssist ||
+                                       targetMod == Module::MemSeat) {
+                                uint8_t modAddr = static_cast<uint8_t>(targetMod);
+                                QString sessHdr = QString("ATSH24%1%2")
+                                    .arg(modAddr, 2, 16, QChar('0')).arg("11").toUpper();
+                                QString readHdr = info.atshHeader;
+                                m_elm->sendCommand(sessHdr, [this, readHdr, done, targetMod](const QString&) {
+                                    QTimer::singleShot(100, this, [this, readHdr, done, targetMod]() {
+                                    m_elm->sendCommand("01 01 00", [this, readHdr, done, targetMod](const QString &resp) {
+                                        bool ok = resp.contains("41") || resp.contains("50");
+                                        emit logMessage(QString("%1 DiagSession: %2")
+                                            .arg(moduleName(targetMod), ok ? "OK" : resp.trimmed()));
+                                        QTimer::singleShot(100, this, [this, readHdr, done]() {
+                                        m_elm->sendCommand(readHdr, [this, done](const QString&) {
                                             if (done) done(true);
                                         });
                                         });
@@ -355,7 +375,13 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                 m_activeModule = targetMod;
                 emit logMessage(QString("Active: %1 | %2").arg(info.shortName, info.atshHeader));
 
-                // TCM needs DiagSession before data read (verified)
+                // J1850 modules that need DiagSession before data read
+                // TCM(0x28): ECUReset via mode 0x10
+                // OHC(0x2A): init via mode 0x11
+                // BCM(0x80): init via mode 0x11 (needed for relay control prep)
+                // Door(0xA0): init via mode 0x11 (needed for IOControl)
+                // Cluster(0x90): init via mode 0x11 (needed for gauge test)
+                // VTSS(0xC0): init via mode 0x11 (needed for security)
                 if (targetMod == Module::TCM) {
                     m_elm->sendCommand("ATSH242810", [this, done](const QString&) {
                         QTimer::singleShot(100, this, [this, done]() {
@@ -368,6 +394,28 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                             // Switch back to data read header
                             QTimer::singleShot(100, this, [this, done]() {
                             m_elm->sendCommand("ATSH242822", [this, done](const QString&) {
+                                if (done) done(true);
+                            });
+                            });
+                        });
+                        });
+                    });
+                } else if (targetMod == Module::BCM || targetMod == Module::Liftgate ||
+                           targetMod == Module::Cluster || targetMod == Module::ParkAssist ||
+                           targetMod == Module::MemSeat) {
+                    // Generic J1850 DiagSession: ATSH24xx11 -> 01 01 00 -> back to read header
+                    uint8_t modAddr = static_cast<uint8_t>(targetMod);
+                    QString sessHdr = QString("ATSH24%1%2")
+                        .arg(modAddr, 2, 16, QChar('0')).arg("11").toUpper();
+                    QString readHdr = info.atshHeader;  // back to mode 0x22
+                    m_elm->sendCommand(sessHdr, [this, readHdr, done, targetMod](const QString&) {
+                        QTimer::singleShot(100, this, [this, readHdr, done, targetMod]() {
+                        m_elm->sendCommand("01 01 00", [this, readHdr, done, targetMod](const QString &resp) {
+                            bool ok = resp.contains("41") || resp.contains("50");
+                            emit logMessage(QString("%1 DiagSession: %2")
+                                .arg(moduleName(targetMod), ok ? "OK" : resp.trimmed()));
+                            QTimer::singleShot(100, this, [this, readHdr, done]() {
+                            m_elm->sendCommand(readHdr, [this, done](const QString&) {
                                 if (done) done(true);
                             });
                             });

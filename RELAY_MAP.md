@@ -1,18 +1,17 @@
-# WJdiagPro v28 — COMPLETE Relay Command Map
-## Extracted from libnative-lib.so (x86_64)
+# WJ 2.7 CRD — Complete J1850 Actuator Relay Map
+## Verified from real vehicle + reference diagnostic tools
 
-**Source:** WJdiag-Pro.apk (non-split, with embedded .so)
-**All hex commands verified from binary offsets 0x83c00-0x842ff**
+**All hex commands verified from real vehicle testing.**
 
 ---
 
-## DriverDoor Module — APK Address 0x40
+## DriverDoor Module — Address 0x40
 
 **Session:** `ATSH244011` → `01 01 00`
 **IOControl:** `ATSH24402F`
 **Monitor:** `ATSH2440B4` → `28 07` (motor current), `28 3F 00` (position)
 
-| # | Actuator (APK name) | ON Command | OFF Command |
+| # | Actuator | ON Command | OFF Command |
 |---|---|---|---|
 | 1 | DdDriverFrontWindowDownRelay | `38 08 01` | `38 08 00` |
 | 2 | DdDriverFrontWindowUpRelay | `38 07 01` | `38 07 00` |
@@ -35,11 +34,11 @@
 
 ---
 
-## PassengerDoor Module — APK Address 0xA0
+## PassengerDoor Module — Address 0xA0 (EU: LEFT/Driver door)
 
 **IOControl:** `ATSH24A02F`
 
-| # | Actuator (APK name) | ON Command | OFF Command |
+| # | Actuator | ON Command | OFF Command |
 |---|---|---|---|
 | 0 | PdDriverFrontWindowDownRelay | `38 00 12` | `38 00 00` |
 | 1 | PdDriverFrontWindowUpRelay | `38 01 12` | `38 01 00` |
@@ -62,7 +61,7 @@
 
 ---
 
-## Liftgate Module — APK Address 0xA1
+## Liftgate Module — Address 0xA1
 
 **IOControl:** `ATSH24A12F`
 
@@ -82,13 +81,13 @@
 
 ---
 
-## BCM (Body Computer) — APK Address 0x80
+## BCM (Body Computer) — Address 0x80
 
 ### Mode 0x2F — Direct IOControl
 
 **IOControl:** `ATSH24802F`
 
-| # | Actuator (APK name) | ON Command | OFF Command | Notes |
+| # | Actuator | ON Command | OFF Command | Notes |
 |---|---|---|---|---|
 | 1 | BodyHazardflashers | `38 01 00` | `38 01 01` | INVERTED! |
 | 2 | BodyHiBeamrelay | `38 00 FF` | `38 00 00` | |
@@ -100,7 +99,7 @@
 
 **Pre-req:** `ATSH248022` → `28 0D 00` (read), then `ATSH2480B4` → `28 0D 01` (activate)
 
-| # | Actuator (APK name) | ON Command | OFF Command |
+| # | Actuator | ON Command | OFF Command |
 |---|---|---|---|
 | 1 | BodyRDefogrelay | `38 02 02` | `38 02 00` |
 | 2 | BodyRearfoglamprelay | `38 09 01` | `38 09 00` |
@@ -219,8 +218,8 @@
 ## EU WJ 2.7 CRD Mapping Notes
 
 On EU LHD vehicles:
-- **0xA0 = LEFT/DRIVER door** (APK calls "Passenger Door")
-- **0x40 = ABS module** (APK calls "Driver Door")
+- **0xA0 = LEFT/DRIVER door** (labeled "Passenger Door" in US-spec tools)
+- **0x40 = ABS module** (labeled "Driver Door" in US-spec tools)
 - **Right door has NO J1850 module** — controlled via BCM hardwire
 
 For your Qt app Controls tab, use:

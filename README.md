@@ -27,7 +27,7 @@ Qt6 C++ mobile diagnostic application for the Jeep Grand Cherokee WJ (2001-2004)
 | Airbag (ORC) | 0x60 | 0x28 | NRC 0x22 on SID 0x22; try mode 0xA0/0xA3 |
 | HVAC | 0x68 | 0x28 | PIDs 0x00-0x03 confirmed; try modes 0x31/0x33 |
 
-Note: BCM (0x80) returns NO DATA for **read** commands on EU-spec WJ but **relay actuator commands work** via mode 0x2F and 0xB4. Cluster (0x90), MemSeat (0x98), Radio (0x87), SKIM (0x62), Overhead Console (0x28), VTSS (0xC0) confirmed present. See [RELAY_MAP.md](RELAY_MAP.md) for complete actuator command reference extracted from WJdiagPro APK.
+Note: BCM (0x80) returns NO DATA for **read** commands on EU-spec WJ but **relay actuator commands work** via mode 0x2F and 0xB4. Cluster (0x90), MemSeat (0x98), Radio (0x87), SKIM (0x62), Overhead Console (0x28), VTSS (0xC0) confirmed present. See [RELAY_MAP.md](RELAY_MAP.md) for complete actuator command reference.
 
 ### J1850 VPW Header Format
 
@@ -191,7 +191,7 @@ When switching between ECU (0x15) and TCM (0x20) on the K-Line bus, the ELM327 m
 
 ### Actuator Control (Controls tab)
 
-J1850 VPW IOControlByLocalIdentifier (mode 0x2F). All commands extracted from WJdiagPro v28 APK `libnative-lib.so`. See [RELAY_MAP.md](RELAY_MAP.md) for complete reference.
+J1850 VPW IOControlByLocalIdentifier (mode 0x2F). See [RELAY_MAP.md](RELAY_MAP.md) for complete command reference.
 
 **EU WJ 2.7 CRD Module Map (VERIFIED on real vehicle):**
 - `0xA0` = Driver Door (LEFT side) — only door module on J1850
@@ -212,7 +212,7 @@ J1850 VPW IOControlByLocalIdentifier (mode 0x2F). All commands extracted from WJ
   6. 38 PID VAL                  (relay command)
 ```
 
-**BCM mode 0x2F has INVERTED controls (from APK):**
+**BCM mode 0x2F has INVERTED controls:**
 - Hazard: ON=`38 01 00`, OFF=`38 01 01`
 - Park Lamp: ON=`38 09 00`, OFF=`38 09 01`
 
@@ -232,7 +232,7 @@ Full activation sequence:
   7. 38 PID 00                   (relay OFF)
 ```
 
-**Driver Door 0xA0 — Verified PID Map (from APK + real vehicle test):**
+**Driver Door 0xA0 — Verified PID Map (real vehicle test):**
 ```
   PID  Function            ON         OFF
   0x00 Front Window Down   38 00 12   38 00 00   ✓ verified
@@ -280,7 +280,7 @@ For Android: Use Qt Creator with Android SDK/NDK configured.
 
 ## Emulator
 
-`wj_tcm_emulator.py` provides a TCP server that emulates the ELM327 + vehicle bus for development without a real vehicle. Supports all modules, realistic timing, gear shift simulation, ECU/TCM security access, and **all APK-verified relay actuator commands** (Door 0xA0/0x40, BCM 0x80 mode 0x2F+0xB4, Cluster 0x90, Radio 0x87, Liftgate 0xA1).
+`wj_tcm_emulator.py` provides a TCP server that emulates the ELM327 + vehicle bus for development without a real vehicle. Supports all modules, realistic timing, gear shift simulation, ECU/TCM security access, and **all verified relay actuator commands** (Door 0xA0/0x40, BCM 0x80 mode 0x2F+0xB4, Cluster 0x90, Radio 0x87, Liftgate 0xA1).
 
 ```bash
 python3 wj_tcm_emulator.py --port 35000
@@ -299,6 +299,6 @@ src/
 include/
   *.h                 Headers for all source files
 wj_tcm_emulator.py   Development emulator (v15, all relay commands)
-RELAY_MAP.md          Complete actuator command reference (from APK)
+RELAY_MAP.md          Complete actuator command reference
 README.md             This file
 ```

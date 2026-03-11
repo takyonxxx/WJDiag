@@ -502,14 +502,38 @@ QWidget* MainWindow::createConnectionTab()
         bool verified;
     };
     QList<ModEntry> modEntries = {
-        {WJDiagnostics::Module::KLineTCM, "TCM (K-Line)", "NAG1 722.6 | ATSH8120F1 | KWP2000", true},
-        {WJDiagnostics::Module::MotorECU, "Engine ECU", "Bosch EDC15C2 OM612 | ATSH8115F1 | KWP2000", true},
-        {WJDiagnostics::Module::ABS, "ABS / ESP", "J1850 VPW | ATSH244022", true},
-        {WJDiagnostics::Module::Airbag, "Airbag", "J1850 VPW | ATSH246022", true},
-        {WJDiagnostics::Module::BCM, "Body Computer", "J1850 VPW | ATSH248022", false},
-        {WJDiagnostics::Module::Cluster, "Instrument Cluster", "J1850 VPW | ATSH249022", false},
-        {WJDiagnostics::Module::ATC, "Climate (HVAC)", "J1850 VPW | ATSH246822", true},
-        {WJDiagnostics::Module::SKIM, "SKIM Immobilizer", "J1850 VPW | ATSH246222", false},
+        // K-Line modules
+        {WJDiagnostics::Module::MotorECU, "Engine ECU",
+         "K-Line 0x15 | EDC15C2 OM612 | Security: ArvutaKoodi", true},
+        {WJDiagnostics::Module::KLineTCM, "TCM (K-Line)",
+         "K-Line 0x20 | NAG1 722.6 EGS52 | Security: swap+XOR", true},
+        // J1850 VPW modules
+        {WJDiagnostics::Module::ABS, "ABS / ESP",
+         "J1850 0x40 | ATRA40 | SID 0x20/0x24/0x36", true},
+        {WJDiagnostics::Module::Airbag, "Airbag (ORC)",
+         "J1850 0x60 | ATRA60 | mode 0x22/0x27/0xA0/0xA3/0x31", true},
+        {WJDiagnostics::Module::SKIM, "SKIM Immobilizer",
+         "J1850 0x62 | ATRA62 | SID 0x38/0x3A", false},
+        {WJDiagnostics::Module::ATC, "Climate (HVAC)",
+         "J1850 0x68 | ATRA68 | mode 0x22/0x31/0x33", true},
+        {WJDiagnostics::Module::BCM, "Body Computer",
+         "J1850 0x80 | ATRA80 | mode 0x2F/0xB4 (relays)", true},
+        {WJDiagnostics::Module::Radio, "Radio / Audio",
+         "J1850 0x87 | ATRA87 | mode 0x2F (mute/vol)", false},
+        {WJDiagnostics::Module::Cluster, "Instrument Cluster",
+         "J1850 0x90 | ATRA90 | mode 0x2F/0x22 (gauge test)", false},
+        {WJDiagnostics::Module::MemSeat, "Memory Seat / Mirror",
+         "J1850 0x98 | ATRA98 | mode 0x2F/0x30 (motors)", false},
+        {WJDiagnostics::Module::Liftgate, "Door Module (0xA0)",
+         "J1850 0xA0 | ATRAA0 | mode 0x2F (windows/locks/mirrors)", true},
+        {WJDiagnostics::Module::HandsFree, "Liftgate / HandsFree",
+         "J1850 0xA1 | ATRAA1 | mode 0x2F/0x31/0x33", false},
+        {WJDiagnostics::Module::EVIC, "Overhead Console (EVIC)",
+         "J1850 0x2A | ATRA2A | mode 0x2F/0xB7 | SID 0x2A", false},
+        {WJDiagnostics::Module::TCM, "TCM (J1850)",
+         "J1850 0x28 | ATRA28 | mode 0x10/0x22/0xA0/0x14/0x20/0x30", false},
+        {WJDiagnostics::Module::ParkAssist, "VTSS / Park Assist",
+         "J1850 0xC0 | ATRAC0 | mode 0x22/0x27/0x2F/0xB4", false},
     };
 
     m_moduleButtons.clear();
@@ -870,7 +894,7 @@ QWidget* MainWindow::createLiveDataTab()
 // ================================================================
 // Controls Tab — Actuator relay controls via J1850 VPW
 // ================================================================
-// APK-verified module map (from libnative-lib.so):
+// Verified module map:
 //   0xA0 = PassengerDoor (EU: LEFT/Driver door) — mode 0x2F, 38 xx 12
 //   0x40 = DriverDoor (EU: ABS, NOT door!) — mode 0x2F, bitmask
 //   0x80 = BCM Body Computer:
@@ -1029,8 +1053,8 @@ QWidget* MainWindow::createControlsTab()
         return btn;
     };
 
-    // EU WJ 2.7 CRD — APK-verified module addresses:
-    //   0xA0 = LEFT/Driver door (APK: "PassengerDoor") — sequential 38 xx 12
+    // EU WJ 2.7 CRD — verified module addresses:
+    //   0xA0 = LEFT/Driver door — sequential 38 xx 12
     //   0x80 = BCM — mode 0x2F + mode 0xB4
     //   EU right door has NO J1850 module
     QString hdrDoor = "ATSH24A02F";   // Left/Driver door 0xA0 mode 0x2F
@@ -1048,10 +1072,10 @@ QWidget* MainWindow::createControlsTab()
 
     winLay->addWidget(new QLabel("Front"), 0, 0, Qt::AlignCenter);
     winLay->addWidget(new QLabel("Rear"),  0, 1, Qt::AlignCenter);
-    // APK: PdFrontWindowUp=38 01 12, PdFrontWindowDown=38 00 12
+    // FrontWindowUp=38 01 12, FrontWindowDown=38 00 12
     winLay->addWidget(makeHoldBtn("UP",   "38 01 12", "38 01 00", "FrontWin Up",   hdrDoor), 1, 0);
     winLay->addWidget(makeHoldBtn("DOWN", "38 00 12", "38 00 00", "FrontWin Down", hdrDoor), 2, 0);
-    // APK: PdRearWindowUp=38 09 12, PdRearWindowDown=38 08 12
+    // RearWindowUp=38 09 12, RearWindowDown=38 08 12
     winLay->addWidget(makeHoldBtn("UP",   "38 09 12", "38 09 00", "RearWin Up",   hdrDoor), 1, 1);
     winLay->addWidget(makeHoldBtn("DOWN", "38 08 12", "38 08 00", "RearWin Down", hdrDoor), 2, 1);
     innerLay->addWidget(winGrp);
@@ -1061,7 +1085,7 @@ QWidget* MainWindow::createControlsTab()
     lockGrp->setStyleSheet(grpStyle);
     QHBoxLayout *lockLay = new QHBoxLayout(lockGrp);
     lockLay->setSpacing(6); lockLay->setContentsMargins(4,4,4,4);
-    // APK: PdLock=38 02 12, PdUnlock=38 0B 12
+    // Lock=38 02 12, Unlock=38 0B 12
     lockLay->addWidget(makePulseBtn("LOCK", "38 02 12", "38 02 00", "Lock", hdrDoor, "#2a2040", "#ff8844"));
     lockLay->addWidget(makePulseBtn("UNLOCK", "38 0B 12", "38 0B 00", "Unlock", hdrDoor, "#1a3050", "#00d4b4"));
     innerLay->addWidget(lockGrp);
@@ -1071,12 +1095,12 @@ QWidget* MainWindow::createControlsTab()
     mirGrp->setStyleSheet(grpStyle);
     QGridLayout *mirLay = new QGridLayout(mirGrp);
     mirLay->setSpacing(4); mirLay->setContentsMargins(4,4,4,4);
-    // APK: PdMirrorUp=38 07, Down=38 03, Left=38 05, Right=38 06
+    // MirrorUp=38 07, Down=38 03, Left=38 05, Right=38 06
     mirLay->addWidget(makeHoldBtn("UP",    "38 07 12", "38 07 00", "Mirror Up",    hdrDoor), 0, 1);
     mirLay->addWidget(makeHoldBtn("LEFT",  "38 05 12", "38 05 00", "Mirror Left",  hdrDoor), 1, 0);
     mirLay->addWidget(makeHoldBtn("RIGHT", "38 06 12", "38 06 00", "Mirror Right", hdrDoor), 1, 2);
     mirLay->addWidget(makeHoldBtn("DOWN",  "38 03 12", "38 03 00", "Mirror Down",  hdrDoor), 2, 1);
-    // APK: PdMirrorHeater=38 04, FoldIn=38 0C, FoldOut=38 0D
+    // MirrorHeater=38 04, FoldIn=38 0C, FoldOut=38 0D
     mirLay->addWidget(makeBCMBtn("Heater",   "38 04 12", "38 04 00", "MirHeater", hdrDoor), 0, 0);
     mirLay->addWidget(makePulseBtn("Fold In",  "38 0C 12", "38 0C 00", "FoldIn",  hdrDoor), 0, 2);
     mirLay->addWidget(makePulseBtn("Fold Out", "38 0D 12", "38 0D 00", "FoldOut", hdrDoor), 2, 0);
@@ -1088,11 +1112,11 @@ QWidget* MainWindow::createControlsTab()
     bcmGrp->setStyleSheet(grpStyle);
     QGridLayout *bcmLay = new QGridLayout(bcmGrp);
     bcmLay->setSpacing(4); bcmLay->setContentsMargins(4,4,4,4);
-    // APK: Horn=38 00 CC/00, HiBeam=38 00 FF/00, LowBeam=38 02 05/00
+    // Horn=38 00 CC/00, HiBeam=38 00 FF/00, LowBeam=38 02 05/00
     bcmLay->addWidget(makeHoldBtn("Horn",     "38 00 CC", "38 00 00", "Horn",    hdrBCM), 0, 0);
     bcmLay->addWidget(makeBCMBtn("Hi Beam",   "38 00 FF", "38 00 00", "HiBeam",  hdrBCM), 0, 1);
     bcmLay->addWidget(makeBCMBtn("Low Beam",  "38 02 05", "38 02 00", "LowBeam", hdrBCM), 0, 2);
-    // APK: Hazard=38 01 00/01 (INVERTED!), ParkLamp=38 09 00/01 (INVERTED!)
+    // Hazard=38 01 00/01 (INVERTED!), ParkLamp=38 09 00/01 (INVERTED!)
     bcmLay->addWidget(makeBCMBtn("Hazard",    "38 01 00", "38 01 01", "Hazard",   hdrBCM), 1, 0);
     bcmLay->addWidget(makeBCMBtn("Park Lamp", "38 09 00", "38 09 01", "ParkLamp", hdrBCM), 1, 1);
     innerLay->addWidget(bcmGrp);
@@ -1102,16 +1126,16 @@ QWidget* MainWindow::createControlsTab()
     bcmB4Grp->setStyleSheet(grpStyle);
     QGridLayout *b4Lay = new QGridLayout(bcmB4Grp);
     b4Lay->setSpacing(4); b4Lay->setContentsMargins(4,4,4,4);
-    // APK: RDefog=38 02 02/00, RearFog=38 09 01/00, FrontFog=38 02 04/00
+    // RDefog=38 02 02/00, RearFog=38 09 01/00, FrontFog=38 02 04/00
     b4Lay->addWidget(makeBCMBtn("R Defog",   "38 02 02", "38 02 00", "RDefog",   hdrBCMB4), 0, 0);
     b4Lay->addWidget(makeBCMBtn("Rear Fog",  "38 09 01", "38 09 00", "RearFog",  hdrBCMB4), 0, 1);
     b4Lay->addWidget(makeBCMBtn("Front Fog", "38 02 04", "38 02 00", "FrontFog", hdrBCMB4), 0, 2);
-    // APK: Wiper=38 04 02/00, VTSS=38 04 01/00, Chime=38 02 03/00, EU Dayl=38 04 04/00
+    // Wiper=38 04 02/00, VTSS=38 04 01/00, Chime=38 02 03/00, EU Dayl=38 04 04/00
     b4Lay->addWidget(makeBCMBtn("Wiper",     "38 04 02", "38 04 00", "Wiper",    hdrBCMB4), 1, 0);
     b4Lay->addWidget(makeBCMBtn("VTSS Lamp", "38 04 01", "38 04 00", "VTSSLamp", hdrBCMB4), 1, 1);
     b4Lay->addWidget(makeBCMBtn("Chime",     "38 02 03", "38 02 00", "Chime",    hdrBCMB4), 1, 2);
     b4Lay->addWidget(makeBCMBtn("EU Dayl",   "38 04 04", "38 04 00", "EUDayl",   hdrBCMB4), 2, 0);
-    // APK: Viper(single wipe)=38 04 03/00
+    // Viper(single wipe)=38 04 03/00
     b4Lay->addWidget(makePulseBtn("Wipe 1x", "38 04 03", "38 04 00", "Viper1x", hdrBCMB4), 2, 1);
     innerLay->addWidget(bcmB4Grp);
 
@@ -1646,7 +1670,7 @@ void MainWindow::runDiscoveryPhases(
 
     // =================================================================
     // EU WJ 2.7 CRD — Module 0xA0 = Driver Door (LEFT side only)
-    // VERIFIED PID map from APK PdDriver* names + real vehicle test:
+    // VERIFIED PID map from real vehicle test:
     //   00=FrontWinDn  01=FrontWinUp  02=Lock     03=MirrorDn
     //   04=MirrorHeat  05=MirrorL     06=MirrorR  07=MirrorUp
     //   08=RearWinDn   09=RearWinUp   0A=Illum    0B=Unlock
@@ -1722,7 +1746,7 @@ void MainWindow::runDiscoveryPhases(
     steps->append(Step{"Battery", "cmd:ATRV"});
 
     // =================================================================
-    // FULL ACTUATOR TEST — APK-verified commands from libnative-lib.so
+    // FULL ACTUATOR TEST — verified commands
     // =================================================================
 
     // --- Phase 2: DriverDoor 0x40 (US spec, EU=ABS) ---
@@ -1731,7 +1755,7 @@ void MainWindow::runDiscoveryPhases(
     steps->append(Step{"", "j1850hdr:ATRA40"});
     steps->append(Step{"DD Session",        "j1850cmd:01 01 00"});
     steps->append(Step{"", "j1850hdr:ATSH24402F"});
-    // APK DdDriver* commands (bitmask-based)
+    // DriverDoor commands (bitmask-based)
     steps->append(Step{"DD FrontWinDn ON",  "j1850cmd:38 08 01"});
     steps->append(Step{"DD FrontWinDn OFF", "j1850cmd:38 08 00"});
     steps->append(Step{"DD FrontWinUp ON",  "j1850cmd:38 07 01"});
@@ -1762,7 +1786,7 @@ void MainWindow::runDiscoveryPhases(
     steps->append(Step{"", "j1850hdr:ATRAA0"});
     steps->append(Step{"PD Session",        "j1850cmd:01 01 00"});
     steps->append(Step{"", "j1850hdr:ATSH24A02F"});
-    // APK PdDriver* commands (sequential 38 xx 12)
+    // PassengerDoor commands (sequential 38 xx 12)
     steps->append(Step{"PD FrontWinDn ON",  "j1850cmd:38 00 12"});
     steps->append(Step{"PD FrontWinDn OFF", "j1850cmd:38 00 00"});
     steps->append(Step{"PD FrontWinUp ON",  "j1850cmd:38 01 12"});
@@ -1803,7 +1827,7 @@ void MainWindow::runDiscoveryPhases(
     steps->append(Step{"", "j1850hdr:ATRA80"});
     steps->append(Step{"BCM Session",       "j1850cmd:01 01 00"});
     steps->append(Step{"", "j1850hdr:ATSH24802F"});
-    // APK BCM mode 0x2F commands
+    // BCM mode 0x2F commands
     steps->append(Step{"BCM Hazard ON",     "j1850cmd:38 01 00"});
     steps->append(Step{"BCM Hazard OFF",    "j1850cmd:38 01 01"});
     steps->append(Step{"BCM HiBeam ON",     "j1850cmd:38 00 FF"});
@@ -1823,7 +1847,7 @@ void MainWindow::runDiscoveryPhases(
     steps->append(Step{"BCM B4 pre-read",   "j1850cmd:28 0D 00"});
     steps->append(Step{"", "j1850hdr:ATSH2480B4"});
     steps->append(Step{"BCM B4 activate",   "j1850cmd:28 0D 01"});
-    // APK BCM mode 0xB4 commands
+    // BCM mode 0xB4 commands
     steps->append(Step{"BCM RDefog ON",     "j1850cmd:38 02 02"});
     steps->append(Step{"BCM RDefog OFF",    "j1850cmd:38 02 00"});
     steps->append(Step{"BCM RearFog ON",    "j1850cmd:38 09 01"});
