@@ -743,6 +743,11 @@ class ELM327Server:
     async def handle_client(self, reader, writer):
         addr = writer.get_extra_info("peername"); log.info("Connected: %s", addr)
         elm = ELM327Emulator()
+        # Auto-log session to file
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        logfile = open(f"session_{ts}.log", "w", buffering=1)
+        logfile.write(f"=== Session start: {addr} at {ts} ===\n")
+        log.info("Logging to session_%s.log", ts)
         try:
             buf = ""
             while True:
@@ -753,6 +758,7 @@ class ELM327Server:
                     line, buf = buf.split("\r", 1); line = line.strip()
                     if not line: continue
                     log.info("  <- %s", line)
+                    logfile.write(f"TX >>> {line}\n")
                     resp = elm.process_command(line)
                     cmd = line.strip().upper()
                     if cmd.startswith("ATZ"): delay = random.uniform(0.5, 0.8)
@@ -767,10 +773,16 @@ class ELM327Server:
                     else: delay = random.uniform(0.2, 0.5)
                     await asyncio.sleep(delay)
                     log.info("  -> %s (%.0fms)", resp, delay*1000)
+                    logfile.write(f"RX <<< {resp}\n")
                     writer.write((resp + "\r\r>").encode("latin-1"))
                     await writer.drain()
         except: pass
-        finally: log.info("Disconnected: %s", addr); writer.close()
+        finally:
+            log.info("Disconnected: %s", addr)
+            logfile.write(f"\n=== Session end ===\n")
+            logfile.close()
+            log.info("Session log saved: session_%s.log", ts)
+            writer.close()
 
     async def run(self):
         srv = await asyncio.start_server(self.handle_client, self.host, self.port)
