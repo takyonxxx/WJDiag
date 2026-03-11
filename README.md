@@ -155,12 +155,31 @@ NAG1 722.6 gear ratios: 1st=3.59, 2nd=2.19, 3rd=1.41, 4th=1.00, 5th=0.83.
 | 0x12 | 34 | Coolant temp, IAT, TPS, MAP, rail pressure, AAP |
 | 0x20 | 32 | MAF actual/spec |
 | 0x22 | 34 | Rail spec, MAP spec |
-| 0x28 | 30 | RPM, injection quantity |
+| 0x28 | 30 | RPM, injection quantity (mg/stroke) |
 | 0x10 | 16 | Idle params, max RPM |
 | 0x62 | 4 | EGR, wastegate, + 2 unknown (security required) |
 | 0xB0 | 2 | Unknown — 0x37, 0x0F at idle (security required) |
-| 0xB1 | 2 | Boost adaptation: s16/10 mbar (security required) |
-| 0xB2 | 2 | Fuel adaptation: s16/100 mg/stroke (security required) |
+| 0xB1 | 2 | Unknown — 0xD2, 0x15 at idle (security required) |
+| 0xB2 | 2 | Unknown — 0xE0, 0x4B at idle (security required) |
+
+### Fuel consumption calculation
+
+Instantaneous fuel flow is calculated from block 0x28 data:
+
+```
+RPM       = block 0x28 [0-1] (unsigned 16-bit)
+InjQty    = block 0x28 [2-3] / 100.0 (mg/stroke)
+Cylinders = 5 (OM612)
+Density   = 832 g/L (diesel)
+
+fuelFlow_gs = RPM * InjQty * 5 / (2 * 1000 * 60)     [g/s]
+fuelFlow_lh = fuelFlow_gs * 3600 / 832                 [L/h]
+```
+
+Verified values from real vehicle:
+- Idle (750 RPM, 12.5 mg/str): **1.69 L/h**
+- Acceleration (2233 RPM, 28.0 mg/str): **11.27 L/h**
+- Deceleration (1339 RPM, 5.6 mg/str): **1.35 L/h**
 
 ### Known issue: K-Line module switching
 

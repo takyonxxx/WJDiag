@@ -238,7 +238,8 @@ void MainWindow::rebuildDashboard()
     m_dashOilPressVal=m_dashOilPressUnit=nullptr;
 
     bool isTCM = (m_moduleSessionActive && m_activeModId == WJDiagnostics::Module::KLineTCM);
-    bool isECU = (m_moduleSessionActive && m_activeModId == WJDiagnostics::Module::MotorECU);
+    bool isECU = (m_moduleSessionActive && m_activeModId == WJDiagnostics::Module::MotorECU)
+                 || !m_moduleSessionActive;  // default = ECU layout
 
     QWidget *panel = new QWidget();
     QGridLayout *g = new QGridLayout(panel);
@@ -286,23 +287,47 @@ void MainWindow::rebuildDashboard()
         for(int c=0; c<4; ++c) g->setColumnStretch(c, 1);
 
     } else if (isECU) {
-        // === ECU DASHBOARD: Engine-only gauges ===
-        // Row 0: RPM | Boost | MAF | Rail
+        // === ECU DASHBOARD: Big FUEL center, engine gauges around ===
+        // Layout (4 cols):
+        //   Row 0:  RPM     | FUEL(2x2)      | INJ-Q
+        //   Row 1:  BOOST   | FUEL(cont)     | RAIL
+        //   Row 2:  M-TEMP  | MAF  | TPS     | BATT
+
+        // Row 0
         g->addWidget(createGaugeCard("RPM", "---", "rpm", &m_dashMotRpmVal, &m_dashMotRpmUnit), 0, 0);
-        g->addWidget(createGaugeCard("BOOST", "---", "mbar", &m_dashMotBoostVal, &m_dashMotBoostUnit), 0, 1);
-        g->addWidget(createGaugeCard("MAF", "---", "mg/s", &m_dashMotMafVal, &m_dashMotMafUnit), 0, 2);
-        g->addWidget(createGaugeCard("RAIL", "---", "bar", &m_dashMotRailVal, &m_dashMotRailUnit), 0, 3);
 
-        // Row 1: M-Temp | IAT | TPS | INJ-Q
-        g->addWidget(createGaugeCard("M-TEMP", "---", "C", &m_dashMotCoolVal, &m_dashMotCoolUnit), 1, 0);
-        g->addWidget(createGaugeCard("IAT", "---", "C", &m_dashCoolantVal, &m_dashCoolantUnit), 1, 1);
-        g->addWidget(createGaugeCard("TPS", "---", "%", &m_dashLimpVal, &m_dashLimpUnit), 1, 2);
-        g->addWidget(createGaugeCard("INJ-Q", "---", "mg", &m_dashSpeedVal, &m_dashSpeedUnit), 1, 3);
+        // Big FUEL display (spans 2 rows, 2 cols) — like TCM gear
+        QFrame *fuelCard = new QFrame();
+        fuelCard->setFrameShape(QFrame::StyledPanel);
+        fuelCard->setStyleSheet("QFrame{background:#0a1420;border:2px solid #00806a;border-radius:10px;}");
+        QVBoxLayout *fl = new QVBoxLayout(fuelCard);
+        fl->setContentsMargins(4,2,4,2); fl->setSpacing(0);
+        QLabel *ft = new QLabel("FUEL");
+        ft->setAlignment(Qt::AlignCenter);
+        ft->setStyleSheet("color:#5888a8;font-size:12px;border:none;background:transparent;");
+        fl->addWidget(ft);
+        m_dashFuelAdaptVal = new QLabel("---");
+        m_dashFuelAdaptVal->setAlignment(Qt::AlignCenter);
+        m_dashFuelAdaptVal->setStyleSheet("color:#00ffa0;font-size:72px;font-weight:bold;"
+            "font-family:'Consolas','Courier New',monospace;border:none;background:transparent;");
+        fl->addWidget(m_dashFuelAdaptVal);
+        m_dashFuelAdaptUnit = new QLabel("L/h");
+        m_dashFuelAdaptUnit->setAlignment(Qt::AlignCenter);
+        m_dashFuelAdaptUnit->setStyleSheet("color:#406888;font-size:12px;border:none;background:transparent;");
+        fl->addWidget(m_dashFuelAdaptUnit);
+        g->addWidget(fuelCard, 0, 1, 2, 2);
 
-        // Row 2: Protected data gauges (EGR, Wastegate, Fuel Adapt, Batt)
-        g->addWidget(createGaugeCard("EGR", "---", "%", &m_dashEgrVal, &m_dashEgrUnit), 2, 0);
-        g->addWidget(createGaugeCard("WG", "---", "%", &m_dashWgVal, &m_dashWgUnit), 2, 1);
-        g->addWidget(createGaugeCard("FUEL-A", "---", "mg", &m_dashFuelAdaptVal, &m_dashFuelAdaptUnit), 2, 2);
+        g->addWidget(createGaugeCard("INJ-Q", "---", "mg/str", &m_dashSpeedVal, &m_dashSpeedUnit), 0, 3);
+
+        // Row 1
+        g->addWidget(createGaugeCard("BOOST", "---", "mbar", &m_dashMotBoostVal, &m_dashMotBoostUnit), 1, 0);
+        // FUEL spans here
+        g->addWidget(createGaugeCard("RAIL", "---", "bar", &m_dashMotRailVal, &m_dashMotRailUnit), 1, 3);
+
+        // Row 2: M-Temp | MAF | TPS | Batt
+        g->addWidget(createGaugeCard("M-TEMP", "---", "C", &m_dashMotCoolVal, &m_dashMotCoolUnit), 2, 0);
+        g->addWidget(createGaugeCard("MAF", "---", "mg/s", &m_dashMotMafVal, &m_dashMotMafUnit), 2, 1);
+        g->addWidget(createGaugeCard("TPS", "---", "%", &m_dashLimpVal, &m_dashLimpUnit), 2, 2);
         g->addWidget(createGaugeCard("BATT", "---", "V", &m_dashBatVoltVal, &m_dashBatVoltUnit), 2, 3);
 
         for(int c=0; c<4; ++c) g->setColumnStretch(c, 1);
@@ -413,8 +438,7 @@ QWidget* MainWindow::createConnectionTab()
 
     // WiFi row
     connGrid->addWidget(new QLabel("WiFi:"), 0, 0);
-    //m_hostEdit = new QLineEdit("192.168.0.10");
-    m_hostEdit = new QLineEdit("192.168.1.116");
+    m_hostEdit = new QLineEdit("192.168.0.10");
     connGrid->addWidget(m_hostEdit, 0, 1);
     m_portSpin = new QSpinBox();
     m_portSpin->setRange(1, 65535);
@@ -1211,7 +1235,11 @@ void MainWindow::onECUDataUpdated(const TCMDiagnostics::ECUStatus &ecu)
     // Protected data gauges (only populated if security unlocked)
     ESET(m_dashEgrVal, QString::number(ecu.egrDuty, 'f', 0));
     ESET(m_dashWgVal, QString::number(ecu.wastegate, 'f', 0));
-    ESET(m_dashFuelAdaptVal, QString::number(ecu.fuelAdapt, 'f', 0));
+    // Fuel consumption L/h
+    ESET(m_dashFuelAdaptVal, QString::number(ecu.fuelFlowLH, 'f', 1));
+    if (m_dashFuelAdaptVal) {
+        ECOL(m_dashFuelAdaptVal, ecu.fuelFlowLH > 15.0 ? "#e04040" : ecu.fuelFlowLH > 8.0 ? "#d09030" : "#00d4b4");
+    }
 
     // Battery voltage (ATRV)
     if (ecu.batteryVoltage > 0) {
@@ -1348,7 +1376,7 @@ void MainWindow::onRawBusDump()
         m_rawDumpBtn->setText("Raw Data Read");
     };
 
-    m_logText->append("<font color='white'>========== TEST v13 ==========</font>");
+    m_logText->append("<font color='white'>========== TEST v14 ==========</font>");
     runDiscoveryPhases(log, done);
 }
 
@@ -1559,7 +1587,7 @@ void MainWindow::runDiscoveryPhases(
 
     *run = [this, steps, idx, run, log, done]() {
         if (*idx >= steps->size()) {
-            m_logText->append("<font color='white'>========== TEST v13 BITTI ==========</font>");
+            m_logText->append("<font color='white'>========== TEST v14 BITTI ==========</font>");
             log("#ffff00", "COPY LOG ile kopyala!");
             done();
             return;
@@ -1683,7 +1711,17 @@ void MainWindow::runDiscoveryPhases(
         if (step.action.startsWith("cmd:")) {
             m_elm->sendCommand(step.action.mid(4), [this, log, run, step](const QString &resp) {
                 bool bad = resp.contains("NO DATA")||resp.contains("ERROR")||resp.contains("7F")||resp.contains("TIMEOUT");
-                log(bad ? "#666666" : "#00ff88", step.label + ": " + resp.trimmed());
+                QString color = bad ? "#666666" : "#00ff88";
+                QString extra;
+                // Source address validation
+                if (resp.contains("F1 15") && step.label.startsWith("TCM")) {
+                    color = "#ff3333";
+                    extra = " [!!! SOURCE=ECU(15) NOT TCM(20)]";
+                } else if (resp.contains("F1 20") && step.label.startsWith("ECU")) {
+                    color = "#ff3333";
+                    extra = " [!!! SOURCE=TCM(20) NOT ECU(15)]";
+                }
+                log(color, step.label + ": " + resp.trimmed() + extra);
                 (*run)();
             });
             return;

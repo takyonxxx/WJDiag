@@ -800,11 +800,19 @@ void WJDiagnostics::parseECUBlock(uint8_t localID, const QByteArray &d, ECUStatu
             ecu.injectionQty = u16(4) / 100.0;
             for (int i = 0; i < 5; i++)
                 ecu.injCorr[i] = s16(18 + i*2) / 100.0;
-            emit logMessage(QString("ECU 2128: rpm=%1 iq=%2 inj=[%3,%4,%5,%6,%7]")
+
+            // Fuel flow calculation: OM612 = 5 cylinders, 4-stroke
+            // mg/stroke * RPM * 5cyl * 60min / (2strokes * 1000000) = g/min
+            // g/min / 832 g/L * 60 = L/h
+            // Simplified: L/h = RPM * IQ * 5 * 60 / (2 * 832 * 1000000)
+            constexpr double DIESEL_DENSITY = 832.0;  // g/L
+            constexpr int CYLINDERS = 5;               // OM612
+            ecu.fuelFlowGS = ecu.rpm * ecu.injectionQty * CYLINDERS / (2.0 * 1000.0 * 60.0);
+            ecu.fuelFlowLH = ecu.fuelFlowGS * 3600.0 / DIESEL_DENSITY;
+
+            emit logMessage(QString("ECU 2128: rpm=%1 iq=%2mg/str fuel=%3L/h %4g/s")
                 .arg(ecu.rpm).arg(ecu.injectionQty,0,'f',1)
-                .arg(ecu.injCorr[0],0,'f',2).arg(ecu.injCorr[1],0,'f',2)
-                .arg(ecu.injCorr[2],0,'f',2).arg(ecu.injCorr[3],0,'f',2)
-                .arg(ecu.injCorr[4],0,'f',2));
+                .arg(ecu.fuelFlowLH,0,'f',2).arg(ecu.fuelFlowGS,0,'f',2));
         }
         break;
     case 0x62:

@@ -126,7 +126,7 @@ class VehicleState:
         self.maf_actual = 420 + 20 * math.sin(t * 0.3)
         self.maf_spec = 360 + 10 * math.sin(t * 0.2)
         self.rail_actual = 290 + 10 * math.sin(t * 0.2)
-        self.injection_qty = 9.5 + 2 * math.sin(t * 0.4)
+        self.injection_qty = 12.5 + (self.engine_rpm - 750) * 0.012 + random.uniform(-0.5, 0.5)
 
 
 class KWP2000Responder:
