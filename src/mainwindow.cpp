@@ -413,7 +413,8 @@ QWidget* MainWindow::createConnectionTab()
 
     // WiFi row
     connGrid->addWidget(new QLabel("WiFi:"), 0, 0);
-    m_hostEdit = new QLineEdit("192.168.0.10");
+    //m_hostEdit = new QLineEdit("192.168.0.10");
+    m_hostEdit = new QLineEdit("192.168.1.116");
     connGrid->addWidget(m_hostEdit, 0, 1);
     m_portSpin = new QSpinBox();
     m_portSpin->setRange(1, 65535);
@@ -1210,7 +1211,7 @@ void MainWindow::onECUDataUpdated(const TCMDiagnostics::ECUStatus &ecu)
     // Protected data gauges (only populated if security unlocked)
     ESET(m_dashEgrVal, QString::number(ecu.egrDuty, 'f', 0));
     ESET(m_dashWgVal, QString::number(ecu.wastegate, 'f', 0));
-    ESET(m_dashFuelAdaptVal, QString::number(ecu.fuelAdapt, 'f', 2));
+    ESET(m_dashFuelAdaptVal, QString::number(ecu.fuelAdapt, 'f', 0));
 
     // Battery voltage (ATRV)
     if (ecu.batteryVoltage > 0) {
@@ -1347,7 +1348,7 @@ void MainWindow::onRawBusDump()
         m_rawDumpBtn->setText("Raw Data Read");
     };
 
-    m_logText->append("<font color='white'>========== TEST v12 ==========</font>");
+    m_logText->append("<font color='white'>========== TEST v13 ==========</font>");
     runDiscoveryPhases(log, done);
 }
 
@@ -1359,11 +1360,52 @@ void MainWindow::runDiscoveryPhases(
     auto steps = std::make_shared<QList<Step>>();
 
     // =================================================================
-    // PHASE 1: J1850 Module Discovery
-    // APK uses: ATZ -> ATSP2 -> ATIFR0 -> ATH1 -> ATSH24XX22 -> ATRAXX
-    // Some modules use different mode bytes (A0, 10, 20, 14, 31, A3)
+    // PHASE 1: ECU Security — ArvutaKoodi + protected + all blocks
     // =================================================================
-    steps->append(Step{"", "header:=== Phase 1: J1850 Module Discovery ==="});
+    steps->append(Step{"", "header:=== Phase 1: ECU ArvutaKoodi + blocks ==="});
+    steps->append(Step{"", "switch:ecu_arvuta"});
+    // After ecu_arvuta, K-Line is on ECU with security unlocked
+    for (int b : {0x10,0x12,0x14,0x16,0x18,0x20,0x22,0x24,0x26,0x28,0x30,
+                  0x32,0x34,0x38,0x40,0x42,0x44,0x48,0x62,0xB0,0xB1,0xB2}) {
+        steps->append(Step{
+            QString("ECU 0x%1").arg(b, 2, 16, QChar('0')).toUpper(),
+            QString("cmd:21 %1").arg(b, 2, 16, QChar('0')).toUpper()
+        });
+    }
+    steps->append(Step{"ECU VIN", "cmd:1A 90"});
+    steps->append(Step{"ECU 1A 91", "cmd:1A 91"});
+    steps->append(Step{"ECU 1A 86", "cmd:1A 86"});
+    steps->append(Step{"ECU TesterPres", "cmd:3E"});
+
+    // =================================================================
+    // PHASE 2: TCM — verify K-Line switch works (ECU->TCM)
+    // =================================================================
+    steps->append(Step{"", "header:=== Phase 2: TCM (K-Line switch from ECU) ==="});
+    steps->append(Step{"", "switch:tcm"});
+    // TesterPresent to verify we're on TCM now
+    steps->append(Step{"TCM TesterPres", "cmd:3E"});
+    steps->append(Step{"TCM 0x30", "cmd:21 30"});
+    // Verify source address in response — should contain "F1 20" not "F1 15"
+    steps->append(Step{"TCM 0x23 DTC", "cmd:21 23"});
+    for (int b : {0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x3E}) {
+        steps->append(Step{
+            QString("TCM 0x%1").arg(b, 2, 16, QChar('0')).toUpper(),
+            QString("cmd:21 %1").arg(b, 2, 16, QChar('0')).toUpper()
+        });
+    }
+
+    // =================================================================
+    // PHASE 3: Switch back to ECU — verify K-Line switch (TCM->ECU)
+    // =================================================================
+    steps->append(Step{"", "header:=== Phase 3: ECU verify (TCM->ECU switch) ==="});
+    steps->append(Step{"", "switch:ecu"});
+    steps->append(Step{"ECU TesterPres", "cmd:3E"});
+    steps->append(Step{"ECU 0x12 check", "cmd:21 12"});
+
+    // =================================================================
+    // PHASE 4: J1850 Module Discovery
+    // =================================================================
+    steps->append(Step{"", "header:=== Phase 4: J1850 Module Discovery ==="});
     steps->append(Step{"", "switch:j1850"});
 
     // --- BCM (0x80) SID 0x2E ---
@@ -1374,7 +1416,7 @@ void MainWindow::runDiscoveryPhases(
     steps->append(Step{"BCM 2E 0D", "j1850cmd:2E 0D 00"});
     steps->append(Step{"BCM 1A 87", "j1850cmd:1A 87 00"});
     steps->append(Step{"BCM 24 00", "j1850cmd:24 00 00"});
-    // APK also uses mode 0x11 for clear — try 0x10 for functional read
+    // Also uses mode 0x11 for clear — try 0x10 for functional read
     steps->append(Step{"", "j1850hdr:ATSH248010"});
     steps->append(Step{"BCM-10 2E 00", "j1850cmd:2E 00 00"});
     // Mode 0x20 (request download in some Chrysler modules)
@@ -1391,13 +1433,13 @@ void MainWindow::runDiscoveryPhases(
     steps->append(Step{"Clust-10 32 00", "j1850cmd:32 00 00"});
 
     // --- Overhead Console (0x28) SID 0x2A ---
-    // APK uses multiple mode bytes: A0, 10, 22, 20, A3, 14, 30
+    // Uses multiple mode bytes: A0, 10, 22, 20, A3, 14, 30
     steps->append(Step{"", "header:--- Overhead 0x28 (multi-mode) ---"});
     steps->append(Step{"", "j1850hdr:ATSH242822"});
     steps->append(Step{"", "j1850hdr:ATRA28"});
     steps->append(Step{"OHC-22 2A 03", "j1850cmd:2A 03 00"});
     steps->append(Step{"OHC-22 1A 87", "j1850cmd:1A 87 00"});
-    // Mode 0xA0 — APK primary read mode
+    // Mode 0xA0 — Primary read mode
     steps->append(Step{"", "j1850hdr:ATSH2428A0"});
     steps->append(Step{"OHC-A0 20 08", "j1850cmd:20 08 00"});
     steps->append(Step{"OHC-A0 20 02", "j1850cmd:20 02 00"});
@@ -1425,7 +1467,7 @@ void MainWindow::runDiscoveryPhases(
     steps->append(Step{"SKIM 1A 87", "j1850cmd:1A 87 00"});
 
     // --- VTSS (0xC0) ---
-    // APK uses mode 0x27 and 0x22
+    // Uses mode 0x27 and 0x22
     steps->append(Step{"", "header:--- VTSS 0xC0 ---"});
     steps->append(Step{"", "j1850hdr:ATSH24C022"});
     steps->append(Step{"", "j1850hdr:ATRAC0"});
@@ -1435,13 +1477,13 @@ void MainWindow::runDiscoveryPhases(
     steps->append(Step{"VTSS-27 28 00", "j1850cmd:28 00 00"});
 
     // --- Airbag (0x60) ---
-    // APK uses mode 0xA0 for reading, 0x22 for diag, 0x27 for security, 0xA3
+    // Uses mode 0xA0 for reading, 0x22 for diag, 0x27 for security, 0xA3
     steps->append(Step{"", "header:--- Airbag 0x60 (multi-mode) ---"});
     steps->append(Step{"", "j1850hdr:ATSH246022"});
     steps->append(Step{"", "j1850hdr:ATRA60"});
     steps->append(Step{"Air-22 28 37 01", "j1850cmd:28 37 01"});
     steps->append(Step{"Air-22 28 0D 00", "j1850cmd:28 0D 00"});
-    // Mode 0xA0 — APK primary read mode
+    // Mode 0xA0 — Primary read mode
     steps->append(Step{"", "j1850hdr:ATSH2460A0"});
     steps->append(Step{"Air-A0 20 00", "j1850cmd:20 00 00"});
     steps->append(Step{"Air-A0 24 00", "j1850cmd:24 00 00"});
@@ -1469,7 +1511,7 @@ void MainWindow::runDiscoveryPhases(
     steps->append(Step{"", "j1850hdr:ATSH24A122"});
     steps->append(Step{"", "j1850hdr:ATRAA1"});
     steps->append(Step{"0xA1 2E 00", "j1850cmd:2E 00 00"});
-    // APK uses mode 0x31 and 0x33
+    // Uses mode 0x31 and 0x33
     steps->append(Step{"", "j1850hdr:ATSH24A131"});
     steps->append(Step{"0xA1-31 0D 10", "j1850cmd:0D 10 00"});
     steps->append(Step{"", "j1850hdr:ATSH24A133"});
@@ -1488,7 +1530,7 @@ void MainWindow::runDiscoveryPhases(
     steps->append(Step{"EVIC 2A 03", "j1850cmd:2A 03 00"});
 
     // --- HVAC (0x68) multiple modes ---
-    // APK uses 0x22, 0x31, 0x33, 0x11
+    // Uses 0x22, 0x31, 0x33, 0x11
     steps->append(Step{"", "header:--- HVAC 0x68 (multi-mode) ---"});
     steps->append(Step{"", "j1850hdr:ATSH246822"});
     steps->append(Step{"", "j1850hdr:ATRA68"});
@@ -1505,41 +1547,6 @@ void MainWindow::runDiscoveryPhases(
     steps->append(Step{"", "j1850hdr:ATSH246833"});
     steps->append(Step{"HVAC-33 2E 02", "j1850cmd:2E 02 00"});
 
-    // =================================================================
-    // PHASE 5: TCM full block scan
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 5: TCM blocks ==="});
-    steps->append(Step{"", "switch:tcm"});
-    steps->append(Step{"TCM 0x30 ref", "cmd:21 30"});
-    for (int b : {0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x3E}) {
-        steps->append(Step{
-            QString("TCM 0x%1").arg(b, 2, 16, QChar('0')).toUpper(),
-            QString("cmd:21 %1").arg(b, 2, 16, QChar('0')).toUpper()
-        });
-    }
-
-    // =================================================================
-    // PHASE 6: ECU Security — ArvutaKoodi + protected blocks
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 6: ECU ArvutaKoodi ==="});
-    steps->append(Step{"", "switch:ecu_arvuta"});
-
-    // =================================================================
-    // PHASE 7: ECU full block scan (post-security)
-    // =================================================================
-    steps->append(Step{"", "header:=== Phase 7: ECU blocks ==="});
-    // After ecu_arvuta, K-Line is on ECU with security unlocked
-    for (int b : {0x10,0x12,0x14,0x16,0x18,0x20,0x22,0x24,0x26,0x28,0x30,
-                  0x32,0x34,0x38,0x40,0x42,0x44,0x48,0x62,0xB0,0xB1,0xB2}) {
-        steps->append(Step{
-            QString("ECU 0x%1").arg(b, 2, 16, QChar('0')).toUpper(),
-            QString("cmd:21 %1").arg(b, 2, 16, QChar('0')).toUpper()
-        });
-    }
-    steps->append(Step{"ECU VIN", "cmd:1A 90"});
-    steps->append(Step{"ECU 1A 91", "cmd:1A 91"});
-    steps->append(Step{"ECU 1A 86", "cmd:1A 86"});
-
     // Final
     steps->append(Step{"", "header:--- Final ---"});
     steps->append(Step{"Battery", "cmd:ATRV"});
@@ -1552,7 +1559,7 @@ void MainWindow::runDiscoveryPhases(
 
     *run = [this, steps, idx, run, log, done]() {
         if (*idx >= steps->size()) {
-            m_logText->append("<font color='white'>========== TEST v12 BITTI ==========</font>");
+            m_logText->append("<font color='white'>========== TEST v13 BITTI ==========</font>");
             log("#ffff00", "COPY LOG ile kopyala!");
             done();
             return;

@@ -95,12 +95,31 @@ TABLE4 (low nibble):  0D 0C 0F 0E 09 08 0B 0A 05 04 07 06 01 00 03 02
 
 - **Seed**: Dynamic (changes every session)
 - **Lockout**: 2 wrong attempts triggers NRC 0x36 (exceededNumberOfAttempts), requires full bus re-init + 3s wait
-- **Protected blocks** (NRC 0x33 without security):
-  - 0x62: EGR duty cycle, wastegate, glow plugs, alternator load
-  - 0xB0: Injector correction values
-  - 0xB1: Boost adaptation
-  - 0xB2: Fuel quantity adaptation
-  - 1A 90: VIN
+- **Protected blocks** (NRC 0x33 without security, verified 2025-03-11):
+  - 0x62: 4 data bytes — EGR duty, wastegate duty, + 2 unknown bytes
+  - 0xB0: 2 data bytes — meaning TBD (0x37, 0x0F observed at idle)
+  - 0xB1: 2 data bytes — boost adaptation (s16/10 = mbar)
+  - 0xB2: 2 data bytes — fuel quantity adaptation (s16/100 = mg/stroke)
+  - 1A 90: VIN (17 ASCII chars)
+  - 1A 91: ECU identification (date, variant code)
+  - 1A 86: ECU hardware/calibration data
+
+### Verified ECU security session (real vehicle log)
+
+```
+→ 27 01
+← 84 F1 15 67 01 DF A0 71        (seed = DF A0)
+  ArvutaKoodi: key = BC 69
+→ 27 02 BC 69
+← 83 F1 15 67 02 34 26            (positive response)
+→ 21 62
+← 86 F1 15 61 62 18 05 8C 84 7C  (4 data bytes)
+→ 21 B0
+← 84 F1 15 61 B0 37 0F E1        (2 data bytes)
+→ 1A 90
+← 93 F1 15 5A 90 31 4A 38 47 57 45 38 32 58 32 59 31 32 32 30 30 36 91
+  VIN: 1J8GWE82X2Y122006
+```
 
 ### TCM Security (EGS52)
 
@@ -129,19 +148,23 @@ TABLE4 (low nibble):  0D 0C 0F 0E 09 08 0B 0A 05 04 07 06 01 00 03 02
 
 NAG1 722.6 gear ratios: 1st=3.59, 2nd=2.19, 3rd=1.41, 4th=1.00, 5th=0.83.
 
-## ECU Live Data Blocks
+## ECU Live Data Blocks (verified from real vehicle)
 
-| Block | Bytes | Key Parameters |
-|-------|-------|----------------|
+| Block | Data Bytes | Key Parameters |
+|-------|-----------|----------------|
 | 0x12 | 34 | Coolant temp, IAT, TPS, MAP, rail pressure, AAP |
 | 0x20 | 32 | MAF actual/spec |
 | 0x22 | 34 | Rail spec, MAP spec |
 | 0x28 | 30 | RPM, injection quantity |
-| 0x10 | 18 | Idle params, max RPM |
-| 0x62 | 20 | EGR, wastegate, glow plugs (security required) |
-| 0xB0 | 16 | Injector corrections (security required) |
-| 0xB1 | 10 | Boost adaptation (security required) |
-| 0xB2 | 10 | Fuel adaptation (security required) |
+| 0x10 | 16 | Idle params, max RPM |
+| 0x62 | 4 | EGR, wastegate, + 2 unknown (security required) |
+| 0xB0 | 2 | Unknown — 0x37, 0x0F at idle (security required) |
+| 0xB1 | 2 | Boost adaptation: s16/10 mbar (security required) |
+| 0xB2 | 2 | Fuel adaptation: s16/100 mg/stroke (security required) |
+
+### Known issue: K-Line module switching
+
+When switching between ECU (0x15) and TCM (0x20) on the K-Line bus, the ELM327 must perform a full bus reinit (ATZ → ATWM → ATSH → ATSP5 → ATFI → 81 → 27). If the previous session has timed out (no communication for 3-5 seconds), the `3E` (TesterPresent) heartbeat will detect this and trigger a reinit. Response source address is validated: TCM responses contain `F1 20`, ECU responses contain `F1 15`.
 
 ## Architecture
 

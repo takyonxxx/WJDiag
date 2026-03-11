@@ -324,11 +324,23 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
     } else {
         // Same bus
         if (newBus == BusType::KLine) {
-            // K-Line: if SAME module already active, skip reinit entirely
+            // K-Line: ALWAYS do full reinit when switching between K-Line modules
+            // because each module needs different ATSH/ATWM/ATFI sequence
+            // Even if m_activeModule matches, the bus may have timed out
             if (targetMod == m_activeModule) {
-                // Session should still be alive from last read (<5s ago)
-                // Just continue without reinit
-                if (done) done(true);
+                // Same module - verify session is alive with a quick test
+                m_elm->sendCommand("3E", [this, done, targetMod](const QString &resp) {
+                    // TesterPresent (3E) - if we get 7E back, session is alive
+                    if (resp.contains("7E") || resp.contains("7e")) {
+                        // Session alive, skip reinit
+                        if (done) done(true);
+                    } else {
+                        // Session dead or wrong module - full reinit
+                        emit logMessage("K-Line session expired, reinitializing...");
+                        m_activeBus = BusType::None;
+                        switchToModule(targetMod, done);
+                    }
+                });
                 return;
             }
             // Different K-Line module: full reinit required
@@ -796,54 +808,60 @@ void WJDiagnostics::parseECUBlock(uint8_t localID, const QByteArray &d, ECUStatu
         }
         break;
     case 0x62:
-        if (n >= 8) {
+        // Block 0x62: Real vehicle returns 4 data bytes after "61 62"
+        // Raw: 61 62 [0]=EGR [1]=wastegate [2][3]=???
+        if (n >= 4) {
             ecu.egrDuty = u8(2);
             ecu.wastegate = u8(3);
-            ecu.glowPlug1 = u8(4) != 0;
-            ecu.glowPlug2 = u8(5) != 0;
-            ecu.mafActual = u16(6);
-            if (n >= 9)
-                ecu.alternatorDuty = u8(8);
-            emit logMessage(QString("ECU 2162: egr=%1% wg=%2% maf=%3 alt=%4%")
+            if (n >= 6) {
+                ecu.glowPlug1 = u8(4) != 0;
+                ecu.glowPlug2 = u8(5) != 0;
+            }
+            if (n >= 8) ecu.mafActual = u16(6);
+            if (n >= 9) ecu.alternatorDuty = u8(8);
+            emit logMessage(QString("ECU 2162: egr=%1 wg=%2 gp1=%3 gp2=%4")
                 .arg(ecu.egrDuty).arg(ecu.wastegate)
-                .arg(ecu.mafActual).arg(ecu.alternatorDuty));
+                .arg(ecu.glowPlug1).arg(ecu.glowPlug2));
         }
         break;
     case 0xB0:
-        // Block B0: Injector corrections & adaptation (EDC15C2)
-        // Byte layout based on Bosch EDC15C2 documentation
-        if (n >= 12) {
-            ecu.injCorr[0] = s16(2) / 100.0;  // Injector 1 correction (mg/stroke)
-            ecu.injCorr[1] = s16(4) / 100.0;  // Injector 2 correction
-            ecu.injCorr[2] = s16(6) / 100.0;  // Injector 3 correction
-            ecu.injCorr[3] = s16(8) / 100.0;  // Injector 4 correction
-            ecu.injCorr[4] = s16(10) / 100.0; // Injector 5 correction
-            if (n >= 14)
-                ecu.injLearn = u8(12);         // Injector learn status
-            if (n >= 16)
-                ecu.oilPressure = u8(14) * 0.5; // Oil pressure (bar)
-            emit logMessage(QString("ECU 21B0: inj1=%1 inj2=%2 inj3=%3 inj4=%4 inj5=%5 learn=%6 oil=%7bar")
-                .arg(ecu.injCorr[0],0,'f',2).arg(ecu.injCorr[1],0,'f',2)
-                .arg(ecu.injCorr[2],0,'f',2).arg(ecu.injCorr[3],0,'f',2)
-                .arg(ecu.injCorr[4],0,'f',2).arg(ecu.injLearn)
-                .arg(ecu.oilPressure,0,'f',1));
+        // Block B0: 2 data bytes after "61 B0"
+        // Real vehicle always returns 37 0F — does NOT change with conditions
+        // byte[0] = 0x37 (55) byte[1] = 0x0F (15)
+        if (n >= 4) {
+            emit logMessage(QString("ECU 21B0: byte0=%1(%2) byte1=%3(%4)")
+                .arg(u8(2),2,16,QChar('0')).arg(u8(2))
+                .arg(u8(3),2,16,QChar('0')).arg(u8(3)));
         }
         break;
     case 0xB1:
-        // Block B1: Boost & idle adaptation
-        if (n >= 6) {
-            ecu.boostAdapt = s16(2) / 10.0;   // Boost adaptation (mbar)
-            ecu.idleAdapt = s16(4) / 10.0;     // Idle speed adaptation (RPM)
-            emit logMessage(QString("ECU 21B1: boostAdapt=%1mbar idleAdapt=%2rpm")
-                .arg(ecu.boostAdapt,0,'f',1).arg(ecu.idleAdapt,0,'f',1));
+        // Block B1: 2 data bytes after "61 B1"
+        // Real vehicle always returns D2 15 — does NOT change with conditions
+        // Likely two separate 8-bit values, NOT a single s16
+        // byte[0] = 0xD2 (210 unsigned, -46 signed)
+        // byte[1] = 0x15 (21)
+        if (n >= 4) {
+            int8_t b0 = static_cast<int8_t>(u8(2));
+            uint8_t b1 = u8(3);
+            ecu.boostAdapt = b0;
+            emit logMessage(QString("ECU 21B1: byte0=%1(%2) byte1=%3(%4)")
+                .arg(u8(2),2,16,QChar('0')).arg(b0)
+                .arg(b1,2,16,QChar('0')).arg(b1));
         }
         break;
     case 0xB2:
-        // Block B2: Fuel quantity adaptation
+        // Block B2: 2 data bytes after "61 B2"
+        // Real vehicle always returns E0 4B — does NOT change with conditions
+        // Likely two separate 8-bit values, NOT a single s16
+        // byte[0] = 0xE0 (224 unsigned, -32 signed) — possibly fuel qty offset
+        // byte[1] = 0x4B (75) — possibly fuel qty limit/factor
         if (n >= 4) {
-            ecu.fuelAdapt = s16(2) / 100.0;   // Fuel adaptation (mg/stroke)
-            emit logMessage(QString("ECU 21B2: fuelAdapt=%1mg")
-                .arg(ecu.fuelAdapt,0,'f',2));
+            int8_t b0 = static_cast<int8_t>(u8(2));
+            uint8_t b1 = u8(3);
+            ecu.fuelAdapt = b0;  // Use signed byte[0] as fuel adaptation
+            emit logMessage(QString("ECU 21B2: byte0=%1(%2) byte1=%3(%4)")
+                .arg(u8(2),2,16,QChar('0')).arg(b0)
+                .arg(b1,2,16,QChar('0')).arg(b1));
         }
         break;
     case 0x10:
@@ -1193,6 +1211,17 @@ void WJDiagnostics::readAllLiveData(std::function<void(const TCMStatus&)> cb)
 
         // Read block 0x30 - contains 22 bytes of live transmission data
         m_elm->sendCommand("21 30", [this, tcm, cb](const QString &resp) {
+            // Validate response is from TCM (0x20), not ECU (0x15)
+            // KWP response: XX F1 20 61 30 ... (source=0x20=TCM)
+            // If we see F1 15, bus is still on ECU - need reinit
+            if (resp.contains("F1 15") && !resp.contains("F1 20")) {
+                emit logMessage("WARNING: Response from ECU (0x15), not TCM (0x20) - bus mismatch!");
+                // Force reinit on next call
+                m_activeBus = BusType::None;
+                m_activeModule = Module::MotorECU; // reflect actual state
+                if (cb) cb(*tcm);
+                return;
+            }
             // Parse KWP response: find "61 30" positive response
             if (!resp.contains("NO DATA") && !resp.contains("7F") && !resp.contains("ERROR")) {
                 QByteArray raw;

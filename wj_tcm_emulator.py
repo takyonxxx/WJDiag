@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WJ Diag - ELM327 Emulator v12 (ArvutaKoodi ECU security)
+WJ Diag - ELM327 Emulator v13 (real vehicle verified)
 ==========================================================
 Jeep Grand Cherokee WJ 2.7 CRD — full J1850 + K-Line emulation.
 
@@ -270,21 +270,45 @@ class KWP2000Responder:
     def _ecu_block(self, b):
         t = self.s
         if b == 0x12:
+            # Real: A2 F1 15 61 12 [34 data bytes]
+            # Bytes: [0-1]=coolant, [2-3]=IAT, [4-7]=0x08B7x2, [8-9]=00 00,
+            #   [10-11]=TPS*100, [12-13]=00 00, [14-15]=MAP, [16-17]=0x038E,
+            #   [18-19]=rail*10, [20-21]=0x01DD, [22-23]=0x012A, [24-25]=???,
+            #   [26-27]=???, [28-29]=AAP, [30-31]=0x03A0, [32-33]=00 00
             cr=int((t.coolant_temp+273.1)*10); ir=int((t.iat+273.1)*10)
-            r = bytes([0x61,0x12])+cr.to_bytes(2,'big')+ir.to_bytes(2,'big')+bytes([0x08,0xB7,0x08,0xB7,0x00,0x00])
-            r += int(t.tps*100).to_bytes(2,'big')+bytes([0x00,0x00])+int(t.map_actual).to_bytes(2,'big')+bytes([0x03,0x8E])
-            r += int(t.rail_actual*10).to_bytes(2,'big')+bytes([0x01,0xDD,0x01,0x2A,0x00,0xAD])
-            r += int(t.aap).to_bytes(2,'big')+bytes([0x03,0xA0,0x00,0x00]); return r
+            r = bytes([0x61,0x12])+cr.to_bytes(2,'big')+ir.to_bytes(2,'big')
+            r += bytes([0x08,0xB7,0x08,0xB7,0x00,0x00])
+            r += int(t.tps*100).to_bytes(2,'big')+bytes([0x00,0x00])
+            r += int(t.map_actual).to_bytes(2,'big')+bytes([0x03,0x8E])
+            r += int(t.rail_actual*10).to_bytes(2,'big')
+            r += bytes([0x01,0xB1,0x01,0x2A,0x00,0x3D])
+            r += int(t.aap).to_bytes(2,'big')+bytes([0x03,0xA0,0x00,0x00])
+            return r
         if b == 0x28:
-            r = bytes([0x61,0x28])+int(t.engine_rpm).to_bytes(2,'big')+int(t.injection_qty*100).to_bytes(2,'big')+bytes(26); return r
+            # Real: 9E F1 15 61 28 [30 data bytes]
+            # [0-1]=RPM, [2-3]=injQty*100, rest=zeroes
+            r = bytes([0x61,0x28])+int(t.engine_rpm).to_bytes(2,'big')
+            r += int(t.injection_qty*100).to_bytes(2,'big')+bytes(26)
+            return r
         if b == 0x20:
+            # Real: A0 F1 15 61 20 [32 data bytes]
+            # [0-1]=MAF actual, [2-3]=MAF spec, rest=static from real vehicle
             r = bytes([0x61,0x20])+int(t.maf_actual).to_bytes(2,'big')+int(t.maf_spec).to_bytes(2,'big')
-            r += bytes([0x03,0xFE,0x00,0x00,0x00,0x93,0x00,0x48,0x01,0xAC,0x01,0x63,0x01,0x08,0x02,0xE8,0x02,0x58,0x00,0x8F,0x00,0x8A,0x03,0xA0,0x02,0x8B]); return r
+            r += bytes([0x03,0xFE,0x00,0x00,0x00,0x94,0x00,0x49,0x01,0xC1,0x01,0x6A,0x01,0x0A,0x02,0xED,0x02,0x5A,0x00,0x89,0x00,0x7E,0x03,0xA0,0x02,0xA2])
+            return r
         if b == 0x22:
+            # Real: A2 F1 15 61 22 [34 data bytes]
+            # [0-1]=coolant, [2-3]=IAT, [4-7]=0x08B7x2, [8-9]=00 00, [10-11]=00 00,
+            # [12-13]=???, [14-15]=MAP, [16-17]=rail*10,
+            # rest=static from real vehicle
             cr=int((t.coolant_temp+273.1)*10); ir=int((t.iat+273.1)*10)
-            r = bytes([0x61,0x22])+cr.to_bytes(2,'big')+ir.to_bytes(2,'big')+bytes([0x08,0xB7,0x08,0xB7,0x00,0x00,0x00,0x00,0x02,0x2E])
-            r += int(t.map_actual).to_bytes(2,'big')+int(t.rail_actual*10).to_bytes(2,'big')
-            r += bytes([0x03,0x98,0x02,0x5A,0x02,0xE4,0x02,0xE4,0x02,0xBF,0x08,0xB7,0x00,0x00]); return r
+            r = bytes([0x61,0x22])+cr.to_bytes(2,'big')+ir.to_bytes(2,'big')
+            r += bytes([0x08,0xB7,0x08,0xB7,0x00,0x00,0x00,0x00])
+            r += int(t.map_actual).to_bytes(2,'big')  # byte 12-13 was 0x0242=578 at idle
+            r += int(t.map_actual).to_bytes(2,'big')   # MAP spec
+            r += int(t.rail_actual*10).to_bytes(2,'big')
+            r += bytes([0x03,0x9E,0x02,0x5C,0x02,0xE4,0x02,0xE4,0x02,0xA2,0x08,0xB7,0x00,0x00])
+            return r
         if b == 0x10: return bytes([0x61,0x10,0x00,0x3F,0x00,0x60,0x00,0x5C,0x0B,0xB8,0x00,0x00,0x00,0x48,0x05,0xAC,0x00,0x00])
         if b == 0x14: return bytes([0x61,0x14,0x7D,0xFE,0x82,0x41,0x82,0x41,0xFF,0x82,0xE6,0x07,0xFF,0xE6])
         if b == 0x16: return bytes([0x61,0x16]+[0x01,0x2C,0x21,0x34,0x01,0x2C]+[0]*10+[0x01,0xF4,0x27,0x10,0x27,0x10,0x07,0x94]+[0]*8+[0x01,0xF4,0x00,0x00,0x00,0x00])
@@ -303,10 +327,15 @@ class KWP2000Responder:
         if b == 0x48: return bytes([0x61,0x48,0x00,0x00,0x00,0x07,0x06,0xC8,0x00,0x06,0x00,0x00,0x00,0x00])
         if b in (0x62,0xB0,0xB1,0xB2):
             if getattr(t, 'ecu_security_unlocked', False):
-                if b == 0x62: return bytes([0x61,0x62,0x00,0x1A,0x02,0x58,0x00,0x00,0x03,0xE8,0x00,0x50,0x01,0xF4,0x00,0x00,0x00,0x80,0x00,0x00])
-                if b == 0xB0: return bytes([0x61,0xB0,0x00,0x29,0x00,0x29,0x00,0x29,0x00,0x29,0x00,0x29,0x01,0x80,0x00,0x00])
-                if b == 0xB1: return bytes([0x61,0xB1,0x01,0x00,0x00,0x80,0x00,0xC0,0x01,0x20])
-                if b == 0xB2: return bytes([0x61,0xB2,0x00,0x64,0x00,0x64,0x00,0x64,0x00,0x64])
+                # Real vehicle data format (verified 2025-03-11):
+                # 0x62: 4 data bytes — 86 F1 15 61 62 18 05 8C 84 [cs]
+                if b == 0x62: return bytes([0x61,0x62,0x18,0x05,0x8C,0x84])
+                # 0xB0: 2 data bytes — 84 F1 15 61 B0 37 0F [cs]
+                if b == 0xB0: return bytes([0x61,0xB0,0x37,0x0F])
+                # 0xB1: 2 data bytes — 84 F1 15 61 B1 D2 15 [cs]
+                if b == 0xB1: return bytes([0x61,0xB1,0xD2,0x15])
+                # 0xB2: 2 data bytes — 84 F1 15 61 B2 E0 4B [cs]
+                if b == 0xB2: return bytes([0x61,0xB2,0xE0,0x4B])
             return bytes([0x7F, 0x21, 0x33])
         if b == 0x60: return bytes([0x7F, 0x21, 0x33])
         return bytes([0x7F, 0x21, 0x12])
@@ -550,10 +579,27 @@ class ELM327Server:
     async def run(self):
         srv = await asyncio.start_server(self.handle_client, self.host, self.port)
         log.info("=" * 60)
-        log.info("  WJ Diag ELM327 Emulator v12 (ArvutaKoodi)")
+        log.info("  WJ Diag ELM327 Emulator v13")
         log.info("  K-Line: ECU(0x15) + TCM(0x20)")
         log.info("  J1850: ABS BCM Cluster Airbag HVAC Seat OHC Radio VTSS")
-        log.info("  Port: %d", self.port)
+        log.info("  Host: %s  Port: %d", self.host, self.port)
+        # Show local IP addresses
+        import socket
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                ip = info[4][0]
+                if not ip.startswith("127."):
+                    log.info("  Connect: %s:%d", ip, self.port)
+        except Exception:
+            pass
+        # Fallback: get default route IP
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            log.info("  WiFi IP: %s:%d", s.getsockname()[0], self.port)
+            s.close()
+        except Exception:
+            pass
         log.info("=" * 60)
         async with srv: await srv.serve_forever()
 
