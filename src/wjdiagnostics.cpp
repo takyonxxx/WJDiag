@@ -759,6 +759,13 @@ void WJDiagnostics::rawSendCommand(const QString &cmd, std::function<void(const 
 void WJDiagnostics::parseECUBlock(uint8_t localID, const QByteArray &d, ECUStatus &ecu)
 {
     int n = d.size();
+    // Debug: log first bytes for verification
+    QString hexDump;
+    for (int i = 0; i < qMin(n, 10); i++)
+        hexDump += QString("%1 ").arg(static_cast<uint8_t>(d[i]), 2, 16, QChar('0')).toUpper();
+    emit logMessage(QString("ECU block 0x%1: n=%2 [%3]")
+        .arg(localID, 2, 16, QChar('0')).toUpper().arg(n).arg(hexDump.trimmed()));
+
     auto u8 = [&](int i) -> uint8_t { return (i < n) ? static_cast<uint8_t>(d[i]) : 0; };
     auto u16 = [&](int i) -> uint16_t { return (uint16_t(u8(i)) << 8) | u8(i+1); };
     auto s16 = [&](int i) -> int16_t { return static_cast<int16_t>(u16(i)); };
@@ -773,10 +780,10 @@ void WJDiagnostics::parseECUBlock(uint8_t localID, const QByteArray &d, ECUStatu
             ecu.railActual = u16(20) / 10.0;         // Java: byte 20, /10 -> bar
             ecu.aap = u16(30);                       // mbar (barometric)
             ecu.boostPressure = ecu.mapActual;        // dashboard shows MAP as boost
-            emit logMessage(QString("ECU 2112: cool=%1 iat=%2 tps=%3% map=%4 rail=%5bar aap=%6")
+            emit logMessage(QString("ECU 2112: cool=%1 iat=%2 tps=%3% map=%4 rail=%5bar aap=%6 [n=%7]")
                 .arg(ecu.coolantTemp,0,'f',1).arg(ecu.iat,0,'f',1)
                 .arg(ecu.tps,0,'f',1).arg(ecu.mapActual)
-                .arg(ecu.railActual,0,'f',1).arg(ecu.aap));
+                .arg(ecu.railActual,0,'f',1).arg(ecu.aap).arg(n));
         }
         break;
     case 0x20:
@@ -795,24 +802,25 @@ void WJDiagnostics::parseECUBlock(uint8_t localID, const QByteArray &d, ECUStatu
         }
         break;
     case 0x28:
-        if (n >= 28) {
+        if (n >= 6) {  // minimum: 61 28 + RPM(2) + InjQty(2)
             ecu.rpm = u16(2);
             ecu.injectionQty = u16(4) / 100.0;
-            for (int i = 0; i < 5; i++)
-                ecu.injCorr[i] = s16(18 + i*2) / 100.0;
+
+            // Injector correction values at bytes 18-27 (if available)
+            if (n >= 28) {
+                for (int i = 0; i < 5; i++)
+                    ecu.injCorr[i] = s16(18 + i*2) / 100.0;
+            }
 
             // Fuel flow calculation: OM612 = 5 cylinders, 4-stroke
-            // mg/stroke * RPM * 5cyl * 60min / (2strokes * 1000000) = g/min
-            // g/min / 832 g/L * 60 = L/h
-            // Simplified: L/h = RPM * IQ * 5 * 60 / (2 * 832 * 1000000)
             constexpr double DIESEL_DENSITY = 832.0;  // g/L
             constexpr int CYLINDERS = 5;               // OM612
             ecu.fuelFlowGS = ecu.rpm * ecu.injectionQty * CYLINDERS / (2.0 * 1000.0 * 60.0);
             ecu.fuelFlowLH = ecu.fuelFlowGS * 3600.0 / DIESEL_DENSITY;
 
-            emit logMessage(QString("ECU 2128: rpm=%1 iq=%2mg/str fuel=%3L/h %4g/s")
+            emit logMessage(QString("ECU 2128: rpm=%1 iq=%2mg/str fuel=%3L/h %4g/s [n=%5]")
                 .arg(ecu.rpm).arg(ecu.injectionQty,0,'f',1)
-                .arg(ecu.fuelFlowLH,0,'f',2).arg(ecu.fuelFlowGS,0,'f',2));
+                .arg(ecu.fuelFlowLH,0,'f',2).arg(ecu.fuelFlowGS,0,'f',2).arg(n));
         }
         break;
     case 0x62:
