@@ -27,7 +27,7 @@ Qt6 C++ mobile diagnostic application for the Jeep Grand Cherokee WJ (2001-2004)
 | Airbag (ORC) | 0x60 | 0x28 | NRC 0x22 on SID 0x22; try mode 0xA0/0xA3 |
 | HVAC | 0x68 | 0x28 | PIDs 0x00-0x03 confirmed; try modes 0x31/0x33 |
 
-Note: BCM (0x80), Cluster (0x90), MemSeat (0x98), SKIM (0x62), Overhead Console (0x28), VTSS (0xC0), Radio (0x87), Liftgate (0xA0) currently return NO DATA on our test vehicle (engine running, BLE ELM327 adapter). These modules are confirmed present and accessible via other diagnostic tools. Investigation ongoing.
+Note: BCM (0x80) returns NO DATA for **read** commands on EU-spec WJ but **relay actuator commands work** via mode 0x2F and 0xB4. Cluster (0x90), MemSeat (0x98), Radio (0x87), SKIM (0x62), Overhead Console (0x28), VTSS (0xC0) confirmed present. See [RELAY_MAP.md](RELAY_MAP.md) for complete actuator command reference extracted from WJdiagPro APK.
 
 ### J1850 VPW Header Format
 
@@ -191,49 +191,70 @@ When switching between ECU (0x15) and TCM (0x20) on the K-Line bus, the ELM327 m
 
 ### Actuator Control (Controls tab)
 
-J1850 VPW IOControlByLocalIdentifier (mode 0x2F).
+J1850 VPW IOControlByLocalIdentifier (mode 0x2F). All commands extracted from WJdiagPro v28 APK `libnative-lib.so`. See [RELAY_MAP.md](RELAY_MAP.md) for complete reference.
 
-**CRITICAL: DiagnosticSession (mode 0x11) must be activated before IOControl.**
-Without `ATSH24XX11` → `01 01 00`, relay commands return positive response but
-the relay does NOT physically activate. This is a DDM safety feature.
+**EU WJ 2.7 CRD Module Map (VERIFIED on real vehicle):**
+- `0xA0` = Driver Door (LEFT side) — only door module on J1850
+- `0x40` = ABS only (NOT a door module on EU spec)
+- `0x80` = BCM — mode 0x2F (Horn, Hazard, Beams, ParkLamp) + mode 0xB4 (Fog, Wiper, Defog, VTSS, Chime)
+- `0xA1` = Liftgate — mode 0x2F
+- `0x90` = Cluster — mode 0x2F (gauge test) + SID 0x3A (self-test)
+- `0x87` = Radio — mode 0x2F (Mute, Volume, Bass)
+- Right door = no J1850 module (hardwired via master switch)
+
+**BCM mode 0xB4 requires pre-activation:**
+```
+  1. ATSH248022                  (read mode header)
+  2. ATRA80                      (receive filter)
+  3. 28 0D 00                    (read current state)
+  4. ATSH2480B4                  (switch to B4 mode)
+  5. 28 0D 01                    (activate extended actuators)
+  6. 38 PID VAL                  (relay command)
+```
+
+**BCM mode 0x2F has INVERTED controls (from APK):**
+- Hazard: ON=`38 01 00`, OFF=`38 01 01`
+- Park Lamp: ON=`38 09 00`, OFF=`38 09 01`
+
+**DiagnosticSession (mode 0x11) REQUIRED before IOControl.**
+Without `ATSH24A011` → `01 01 00`, relay commands return positive response
+but do NOT physically activate. This is a safety feature.
 
 ```
 Full activation sequence:
-  1. ATSP2                       (set J1850 VPW protocol)
-  2. ATSH24XX11                  (DiagSessionControl header, XX=target)
-  3. ATRAxx                      (receive filter)
+  1. ATSP2                       (J1850 VPW protocol)
+  2. ATSH24A011                  (DiagSession header for 0xA0)
+  3. ATRAA0                      (receive filter)
   4. 01 01 00                    (activate diagnostic session)
-  5. ATSH24XX2F                  (IOControl header)
-  6. 38 PID VAL                  (relay ON)
-  ...repeat 38 PID VAL while holding button (400ms interval)...
+  5. ATSH24A02F                  (IOControl header)
+  6. 38 PID 12                   (relay ON — value 0x12)
+  ...repeat while holding button (400ms interval)...
   7. 38 PID 00                   (relay OFF)
 ```
 
-**Left (DriverDoor 0x40):**
+**Driver Door 0xA0 — Verified PID Map (from APK + real vehicle test):**
 ```
-  Session:     ATSH244011 -> 01 01 00
-  Window UP:   ATSH24402F -> 38 07 01 (ON) / 38 07 00 (OFF)
-  Window DOWN: ATSH24402F -> 38 08 01 (ON) / 38 08 00 (OFF)
-  Auto-DOWN:   38 08 01 (300ms pulse — triggers express-down)
-  Lock:        38 06 02 (ON) / 38 06 00 (OFF) — triggers hazard + horn
-  Unlock:      3A 02 FF (release all relays)
+  PID  Function            ON         OFF
+  0x00 Front Window Down   38 00 12   38 00 00   ✓ verified
+  0x01 Front Window Up     38 01 12   38 01 00   ✓ verified
+  0x02 Door Lock           38 02 12   38 02 00
+  0x03 Mirror Down         38 03 12   38 03 00
+  0x04 Mirror Heater       38 04 12   38 04 00
+  0x05 Mirror Left         38 05 12   38 05 00
+  0x06 Mirror Right        38 06 12   38 06 00
+  0x07 Mirror Up           38 07 12   38 07 00
+  0x08 Rear Window Down    38 08 12   38 08 00
+  0x09 Rear Window Up      38 09 12   38 09 00
+  0x0A Switch Illumination 38 0A 12   38 0A 00
+  0x0B Door Unlock         38 0B 12   38 0B 00
+  0x0C Foldaway In         38 0C 12   38 0C 00
+  0x0D Foldaway Out        38 0D 12   38 0D 00
+  0x0E Unknown             38 0E 12   38 0E 00
+  0x0F Unknown             38 0F 12   38 0F 00
 ```
 
-**Right (PassengerDoor 0xA0):**
-```
-  Session:     ATSH24A011 -> 01 01 00
-  Window UP:   ATSH24A02F -> 38 01 12 (ON) / 38 01 00 (OFF)
-  Window DOWN: ATSH24A02F -> 38 00 12 (ON) / 38 00 00 (OFF)
-```
-
-**Body Controls (BCM 0x80):**
-```
-  Session:     ATSH248011 -> 01 01 00
-  Hazard:      ATSH24802F -> 38 01 00 (ON) / 38 01 01 (OFF)
-  Horn:        ATSH24802F -> 38 00 CC (ON) / 38 00 00 (OFF)
-```
-Note: BCM 0x80 returned NO DATA without DiagSession in earlier tests.
-DiagSession may fix this — pending verification.
+All 16 PIDs return positive response. Left side actuators confirmed working
+(front window, mirror, door light). Right side has no J1850 module.
 
 ## Architecture
 
@@ -259,7 +280,7 @@ For Android: Use Qt Creator with Android SDK/NDK configured.
 
 ## Emulator
 
-`wj_tcm_emulator.py` provides a TCP server that emulates the ELM327 + vehicle bus for development without a real vehicle. Supports all modules, realistic timing, gear shift simulation, and both ECU (ArvutaKoodi) and TCM (EGS52) security access.
+`wj_tcm_emulator.py` provides a TCP server that emulates the ELM327 + vehicle bus for development without a real vehicle. Supports all modules, realistic timing, gear shift simulation, ECU/TCM security access, and **all APK-verified relay actuator commands** (Door 0xA0/0x40, BCM 0x80 mode 0x2F+0xB4, Cluster 0x90, Radio 0x87, Liftgate 0xA1).
 
 ```bash
 python3 wj_tcm_emulator.py --port 35000
@@ -269,7 +290,7 @@ python3 wj_tcm_emulator.py --port 35000
 
 ```
 src/
-  mainwindow.cpp      UI, test procedures
+  mainwindow.cpp      UI, controls tab, test procedures
   wjdiagnostics.cpp   Module management, security, live data decode
   kwp2000handler.cpp  KWP2000 protocol framing
   livedata.cpp        Live data polling and display
@@ -277,6 +298,7 @@ src/
   main.cpp            Application entry point
 include/
   *.h                 Headers for all source files
-wj_tcm_emulator.py   Development emulator
+wj_tcm_emulator.py   Development emulator (v15, all relay commands)
+RELAY_MAP.md          Complete actuator command reference (from APK)
 README.md             This file
 ```

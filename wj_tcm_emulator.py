@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WJ Diag - ELM327 Emulator v14 (real vehicle verified)
+WJ Diag - ELM327 Emulator v15 (APK-verified relay commands)
 ==========================================================
 Jeep Grand Cherokee WJ 2.7 CRD — full J1850 + K-Line emulation.
 
@@ -9,10 +9,14 @@ K-Line: ECU(0x15) + TCM(0x20)
   TCM security: EGS52 swap+XOR+MUL (static seed 0x6824)
 J1850:  ABS(0x40)  SID 0x20/0x24  | Airbag(0x60) SID 0x28
         SKIM(0x62) SID 0x38/0x3A  | HVAC(0x68)   SID 0x28
-        BCM(0x80)  SID 0x2E       | Radio(0x87)  SID 0x2F
-        Cluster(0x90) SID 0x32    | MemSeat(0x98) SID 0x38
-        Liftgate(0xA0)            | Overhead(0x28) SID 0x2A
-        VTSS(0xC0)                | 0xA1
+        BCM(0x80)  mode 0x2F+0xB4 | Radio(0x87)  mode 0x2F
+        Cluster(0x90) mode 0x2F   | MemSeat(0x98) SID 0x38
+        Liftgate(0xA1) mode 0x2F  | Overhead(0x28) SID 0x2A
+        Door(0xA0) mode 0x2F      | VTSS(0xC0)
+        DriverDoor(0x40) mode 0x2F
+
+Relay commands extracted from WJdiag-Pro.apk libnative-lib.so
+See RELAY_MAP.md for complete command reference.
 
 python wj_tcm_emulator.py [--host 0.0.0.0] [--port 35000]
 """
@@ -451,10 +455,24 @@ class ELM327Emulator:
                     if pid == 0x3F:  # window position/status
                         return "26 40 E8 3F 00 00 DD"
                 return f"26 40 7F B4 12 00 DD"
-            if t == 0x80:  # BCM mode B4
+            if t == 0x80:  # BCM mode B4 — extended actuators
                 if sid == 0x28:
                     pid = data[0] if data else 0
+                    if pid == 0x0D:
+                        val = data[1] if len(data) > 1 else 0
+                        logging.info(f"BCM B4: {'activate' if val else 'pre-read'} 0x0D val=0x{val:02X}")
                     return f"26 80 E8 {pid:02X} 00 00 DD"
+                if sid == 0x38:
+                    pid = data[0] if data else 0
+                    val = data[1] if len(data) > 1 else 0
+                    # APK BCM mode B4: RDefog(02 02), RearFog(09 01), VTSS(04 01),
+                    # Wiper(04 02), FrontFog(02 04), Viper1x(04 03), Chime(02 03), EUDayl(04 04)
+                    names = {(0x02,0x02):"RDefog ON",(0x09,0x01):"RearFog ON",(0x04,0x01):"VTSS ON",
+                             (0x04,0x02):"Wiper ON",(0x02,0x04):"FrontFog ON",(0x04,0x03):"Viper1x",
+                             (0x02,0x03):"Chime ON",(0x04,0x04):"EUDayl ON",
+                             (0x02,0x00):"OFF",(0x04,0x00):"OFF",(0x09,0x00):"OFF"}
+                    logging.info(f"BCM B4 relay: {names.get((pid,val),'?')} PID=0x{pid:02X} VAL=0x{val:02X}")
+                    return f"26 80 6F 38 {pid:02X} {val:02X} DD"
                 return f"26 80 7F B4 12 00 DD"
             return "NO DATA"
 
@@ -490,27 +508,99 @@ class ELM327Emulator:
                     logging.info("DriverDoor: Unlock/Release ALL")
                     return "26 40 6F 3A 02 FF 05"
                 return "26 40 7F 2F 12 00 DD"
-            if t == 0xA0:  # PassengerDoor — ALL VERIFIED
+            if t == 0xA0:  # EU WJ: Driver Door (LEFT side) — VERIFIED on real vehicle
                 if sid == 0x38:
                     pid = data[0] if data else 0
                     val = data[1] if len(data) > 1 else 0
+                    # Full PID map from APK PdDriver* JNI names + real vehicle test
+                    # 00=FrontWinDn 01=FrontWinUp 02=Lock    03=MirrorDn
+                    # 04=MirrorHeat 05=MirrorL    06=MirrorR 07=MirrorUp
+                    # 08=RearWinDn  09=RearWinUp  0A=Illum   0B=Unlock
+                    # 0C=FoldIn     0D=FoldOut    0E=?       0F=?
                     real = {
-                        (0x00,0x12): "26 A0 6F 38 00 12 D0",
-                        (0x00,0x00): "26 A0 6F 38 00 00 27",
-                        (0x01,0x12): "26 A0 6F 38 01 12 9C",
-                        (0x01,0x00): "26 A0 6F 38 01 00 6B",
-                        (0x08,0x12): "26 A0 6F 38 08 12 8A",
-                        (0x08,0x00): "26 A0 6F 38 08 00 7D",
-                        (0x09,0x12): "26 A0 6F 38 09 12 C6",
-                        (0x09,0x00): "26 A0 6F 38 09 00 31",
+                        (0x00,0x12): "26 A0 6F 38 00 12 D0",  # FrontWinDn ON
+                        (0x00,0x00): "26 A0 6F 38 00 00 27",  # FrontWinDn OFF
+                        (0x01,0x12): "26 A0 6F 38 01 12 9C",  # FrontWinUp ON
+                        (0x01,0x00): "26 A0 6F 38 01 00 6B",  # FrontWinUp OFF
+                        (0x02,0x12): "26 A0 6F 38 02 12 48",  # Lock ON
+                        (0x02,0x00): "26 A0 6F 38 02 00 BF",  # Lock OFF
+                        (0x03,0x12): "26 A0 6F 38 03 12 04",  # MirrorDn ON
+                        (0x03,0x00): "26 A0 6F 38 03 00 F3",  # MirrorDn OFF
+                        (0x04,0x12): "26 A0 6F 38 04 12 FD",  # MirrorHeat ON
+                        (0x04,0x00): "26 A0 6F 38 04 00 0A",  # MirrorHeat OFF
+                        (0x05,0x12): "26 A0 6F 38 05 12 B1",  # MirrorL ON
+                        (0x05,0x00): "26 A0 6F 38 05 00 46",  # MirrorL OFF
+                        (0x06,0x12): "26 A0 6F 38 06 12 65",  # MirrorR ON
+                        (0x06,0x00): "26 A0 6F 38 06 00 92",  # MirrorR OFF
+                        (0x07,0x12): "26 A0 6F 38 07 12 29",  # MirrorUp ON
+                        (0x07,0x00): "26 A0 6F 38 07 00 DE",  # MirrorUp OFF
+                        (0x08,0x12): "26 A0 6F 38 08 12 8A",  # RearWinDn ON
+                        (0x08,0x00): "26 A0 6F 38 08 00 7D",  # RearWinDn OFF
+                        (0x09,0x12): "26 A0 6F 38 09 12 C6",  # RearWinUp ON
+                        (0x09,0x00): "26 A0 6F 38 09 00 31",  # RearWinUp OFF
+                        (0x0A,0x12): "26 A0 6F 38 0A 12 12",  # Illum ON
+                        (0x0A,0x00): "26 A0 6F 38 0A 00 E5",  # Illum OFF
+                        (0x0B,0x12): "26 A0 6F 38 0B 12 5E",  # Unlock ON
+                        (0x0B,0x00): "26 A0 6F 38 0B 00 A9",  # Unlock OFF
+                        (0x0C,0x12): "26 A0 6F 38 0C 12 A7",  # FoldIn ON
+                        (0x0C,0x00): "26 A0 6F 38 0C 00 50",  # FoldIn OFF
+                        (0x0D,0x12): "26 A0 6F 38 0D 12 EB",  # FoldOut ON
+                        (0x0D,0x00): "26 A0 6F 38 0D 00 1C",  # FoldOut OFF
+                        (0x0E,0x12): "26 A0 6F 38 0E 12 3F",  # Unknown ON
+                        (0x0E,0x00): "26 A0 6F 38 0E 00 C8",  # Unknown OFF
+                        (0x0F,0x12): "26 A0 6F 38 0F 12 73",  # Unknown ON
+                        (0x0F,0x00): "26 A0 6F 38 0F 00 84",  # Unknown OFF
                     }
-                    logging.info(f"PassengerDoor relay: PID=0x{pid:02X} VAL=0x{val:02X}")
+                    names = {0:"FrontWinDn",1:"FrontWinUp",2:"Lock",3:"MirrorDn",
+                             4:"MirrorHeat",5:"MirrorL",6:"MirrorR",7:"MirrorUp",
+                             8:"RearWinDn",9:"RearWinUp",0xA:"Illum",0xB:"Unlock",
+                             0xC:"FoldIn",0xD:"FoldOut",0xE:"Unk0E",0xF:"Unk0F"}
+                    logging.info(f"Door 0xA0: {names.get(pid,'?')} PID=0x{pid:02X} VAL=0x{val:02X}")
                     return real.get((pid, val), f"26 A0 6F 38 {pid:02X} {val:02X} 00")
                 if sid == 0x3A:
                     return "26 A0 7F 2F 12 00 BC"
                 return "26 A0 7F 2F 12 00 BC"
-            if t == 0x80:  # BCM — NO DATA on EU-spec WJ
-                return "NO DATA"
+            if t == 0x80:  # BCM mode 0x2F — APK-verified relay commands
+                if sid == 0x38:
+                    pid = data[0] if data else 0
+                    val = data[1] if len(data) > 1 else 0
+                    # APK BCM mode 0x2F: Hazard(01 00/01 INV), HiBeam(00 FF), Horn(00 CC), LowBeam(02 05), ParkLamp(09 00/01 INV)
+                    names = {(0x01,0x00):"Hazard ON",(0x01,0x01):"Hazard OFF",
+                             (0x00,0xFF):"HiBeam ON",(0x00,0xCC):"Horn ON",(0x00,0x00):"OFF",
+                             (0x02,0x05):"LowBeam ON",(0x02,0x00):"LowBeam OFF",
+                             (0x09,0x00):"ParkLamp ON",(0x09,0x01):"ParkLamp OFF"}
+                    logging.info(f"BCM 0x2F: {names.get((pid,val),'?')} PID=0x{pid:02X} VAL=0x{val:02X}")
+                    return f"26 80 6F 38 {pid:02X} {val:02X} DD"
+                return f"26 80 7F 2F 12 00 DD"
+            if t == 0xA1:  # Liftgate mode 0x2F — sequential like 0xA0
+                if sid == 0x38:
+                    pid = data[0] if data else 0
+                    val = data[1] if len(data) > 1 else 0
+                    logging.info(f"Liftgate 0xA1: PID=0x{pid:02X} VAL=0x{val:02X}")
+                    return f"26 A1 6F 38 {pid:02X} {val:02X} DD"
+                return f"26 A1 7F 2F 12 00 DD"
+            if t == 0x90:  # Cluster mode 0x2F — gauge test
+                if sid == 0x38:
+                    pid = data[0] if data else 0
+                    val = data[1] if len(data) > 1 else 0
+                    logging.info(f"Cluster gauge test: PID=0x{pid:02X} VAL=0x{val:02X}")
+                    return f"26 90 6F 38 {pid:02X} {val:02X} DD"
+                if sid == 0x3A:
+                    pid = data[0] if data else 0
+                    val = data[1] if len(data) > 1 else 0
+                    logging.info(f"Cluster self-test: PID=0x{pid:02X} VAL=0x{val:02X}")
+                    return f"26 90 7A {pid:02X} {val:02X} DD"
+                return f"26 90 7F 2F 12 00 DD"
+            if t == 0x87:  # Radio mode 0x2F — APK-verified
+                if sid == 0x38:
+                    pid = data[0] if data else 0
+                    val = data[1] if len(data) > 1 else 0
+                    names = {(0x18,0x01):"Mute ON",(0x18,0x00):"Mute OFF",
+                             (0x0D,0x02):"Vol Up",(0x0D,0x03):"Vol Down",(0x0D,0x00):"Vol OFF",
+                             (0x0A,0x01):"Bass ON",(0x0A,0x00):"Bass OFF"}
+                    logging.info(f"Radio: {names.get((pid,val),'?')} PID=0x{pid:02X} VAL=0x{val:02X}")
+                    return f"26 87 6F 38 {pid:02X} {val:02X} DD"
+                return f"26 87 7F 2F 12 00 DD"
             return "NO DATA"
 
         # ABS (0x40) — SID 0x20 data, 0x24 DTC
@@ -685,9 +775,10 @@ class ELM327Server:
     async def run(self):
         srv = await asyncio.start_server(self.handle_client, self.host, self.port)
         log.info("=" * 60)
-        log.info("  WJ Diag ELM327 Emulator v14")
+        log.info("  WJ Diag ELM327 Emulator v15")
         log.info("  K-Line: ECU(0x15) + TCM(0x20)")
         log.info("  J1850: ABS BCM Cluster Airbag HVAC Seat OHC Radio VTSS")
+        log.info("  Relay: Door(0xA0/0x40) BCM(0x2F+0xB4) Cluster Radio Liftgate")
         log.info("  Host: %s  Port: %d", self.host, self.port)
         # Show local IP addresses
         import socket
