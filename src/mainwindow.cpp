@@ -439,8 +439,7 @@ QWidget* MainWindow::createConnectionTab()
 
     // WiFi row
     connGrid->addWidget(new QLabel("WiFi:"), 0, 0);
-    //m_hostEdit = new QLineEdit("192.168.0.10");
-    m_hostEdit = new QLineEdit("192.168.1.5");
+    m_hostEdit = new QLineEdit("192.168.0.10");
     connGrid->addWidget(m_hostEdit, 0, 1);
     m_portSpin = new QSpinBox();
     m_portSpin->setRange(1, 65535);
@@ -534,7 +533,13 @@ QWidget* MainWindow::createConnectionTab()
         {WJDiagnostics::Module::TCM, "TCM (J1850)",
          "J1850 0x28 | ATRA28 | mode 0x10/0x22/0xA0/0x14/0x20/0x30", false},
         {WJDiagnostics::Module::ParkAssist, "VTSS / Park Assist",
-         "J1850 0xC0 | ATRAC0 | mode 0x22/0x27/0x2F/0xB4", false},
+         "J1850 0xC0 | ATRAC0 | mode 0x22/0x27/0x2F/0xB4", true},
+        {WJDiagnostics::Module::ESP_Module, "ESP / Traction Control",
+         "J1850 0x58 | ATRA58 | SID 0x20/0x24/0x28/0x2E", true},
+        {WJDiagnostics::Module::Compass, "Compass / Traveler",
+         "J1850 0x61 | ATRA61 | SID 0x20/0x24/0x28", true},
+        {WJDiagnostics::Module::Siren, "Siren / Security",
+         "J1850 0xA7 | ATRAA7 | SID 0x20/0x24/0x28/0x2E", true},
     };
 
     m_moduleButtons.clear();

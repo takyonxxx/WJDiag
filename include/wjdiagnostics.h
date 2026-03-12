@@ -42,7 +42,10 @@ public:
         MemSeat      = 0x98,   // Memory Seat/Mirror
         Liftgate     = 0xA0,   // Power Liftgate
         HandsFree    = 0xA1,   // HandsFree / Uconnect
-        ParkAssist   = 0xC0,   // Park Assist
+        ESP_Module  = 0x58,   // ESP/Traction Control
+        Compass      = 0x61,   // Compass/Traveler
+        Siren        = 0xA7,   // Siren/Security Module
+        ParkAssist   = 0xC0,   // VTSS/Park Assist
     };
     Q_ENUM(Module)
 

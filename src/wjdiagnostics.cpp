@@ -53,6 +53,12 @@ QList<WJDiagnostics::ModuleInfo> WJDiagnostics::allModules()
          BusType::J1850, "ATSH24A022", "", "ATSP2", "ATRAA0"},
         {Module::HandsFree, "Liftgate / HandsFree", "HFM",
          BusType::J1850, "ATSH24A122", "", "ATSP2", "ATRAA1"},
+        {Module::ESP_Module, "ESP / Traction Control", "ESP",
+         BusType::J1850, "ATSH245822", "", "ATSP2", "ATRA58"},
+        {Module::Compass, "Compass / Traveler", "Compass",
+         BusType::J1850, "ATSH246122", "", "ATSP2", "ATRA61"},
+        {Module::Siren, "Siren / Security", "Siren",
+         BusType::J1850, "ATSH24A722", "", "ATSP2", "ATRAA7"},
         {Module::ParkAssist, "VTSS / Park Assist", "VTSS",
          BusType::J1850, "ATSH24C022", "", "ATSP2", "ATRAC0"},
     };

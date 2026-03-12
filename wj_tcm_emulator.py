@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WJ Diag - ELM327 Emulator v15 (verified relay commands)
+WJ Diag - ELM327 Emulator v16 (PCAP-verified)
 ==========================================================
 Jeep Grand Cherokee WJ 2.7 CRD — full J1850 + K-Line emulation.
 
@@ -15,7 +15,7 @@ J1850:  ABS(0x40)  SID 0x20/0x24  | Airbag(0x60) SID 0x28
         Door(0xA0) mode 0x2F      | VTSS(0xC0)
         DriverDoor(0x40) mode 0x2F
 
-Relay commands verified from real vehicle + reference diagnostic tools
+252 responses verified from real vehicle PCAP captures (2026-03-12)
 See RELAY_MAP.md for complete command reference.
 
 python wj_tcm_emulator.py [--host 0.0.0.0] [--port 35000]
@@ -370,7 +370,7 @@ class KWP2000Responder:
 
 
 class ELM327Emulator:
-    VER = "ELM327 v1.5"
+    VER = "OBDII  v1.5"
 
     def __init__(self):
         self.state = VehicleState()
@@ -698,9 +698,9 @@ class ELM327Emulator:
                 return ohc.get(p, "26 28 7F 22 12 00 DD")
             return "NO DATA"
 
-        # EVIC (0x2A) — SID 0x2A
+        # EVIC (0x2A) — NO DATA on real vehicle (PCAP verified)
         if t == 0x2A:
-            if sid == 0x2A: return f"26 2A 6A {data[0]:02X} 00 00 DD" if data else "NO DATA"
+            return "NO DATA"
             return "NO DATA"
 
         # Liftgate (0xA0)
@@ -787,7 +787,7 @@ class ELM327Server:
     async def run(self):
         srv = await asyncio.start_server(self.handle_client, self.host, self.port)
         log.info("=" * 60)
-        log.info("  WJ Diag ELM327 Emulator v15")
+        log.info("  WJ Diag ELM327 Emulator v16")
         log.info("  K-Line: ECU(0x15) + TCM(0x20)")
         log.info("  J1850: ABS BCM Cluster Airbag HVAC Seat OHC Radio VTSS")
         log.info("  Relay: Door(0xA0/0x40) BCM(0x2F+0xB4) Cluster Radio Liftgate")

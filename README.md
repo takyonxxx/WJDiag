@@ -27,7 +27,7 @@ Qt6 C++ mobile diagnostic application for the Jeep Grand Cherokee WJ (2001-2004)
 | Airbag (ORC) | 0x60 | 0x28 | NRC 0x22 on SID 0x22; try mode 0xA0/0xA3 |
 | HVAC | 0x68 | 0x28 | PIDs 0x00-0x03 confirmed; try modes 0x31/0x33 |
 
-Note: BCM (0x80) returns NO DATA for **read** commands on EU-spec WJ but **relay actuator commands work** via mode 0x2F and 0xB4. Cluster (0x90), MemSeat (0x98), Radio (0x87), SKIM (0x62), Overhead Console (0x28), VTSS (0xC0) confirmed present. See [RELAY_MAP.md](RELAY_MAP.md) for complete actuator command reference.
+Note: BCM (0x80) and EVIC (0x2A) return NO DATA (confirmed from real vehicle PCAP 2026-03-12). Three new modules discovered from PCAP: ESP/Traction(0x58), Compass(0x61), Siren(0xA7). Airbag(0x60) returns NRC 0x22 always. ECU block 0x62 confirmed as live data (values change between sessions). See [RELAY_MAP.md](RELAY_MAP.md) for complete actuator command reference.
 
 ### J1850 VPW Header Format
 
@@ -280,7 +280,7 @@ For Android: Use Qt Creator with Android SDK/NDK configured.
 
 ## Emulator
 
-`wj_tcm_emulator.py` provides a TCP server that emulates the ELM327 + vehicle bus for development without a real vehicle. Supports all modules, realistic timing, gear shift simulation, ECU/TCM security access, and **all verified relay actuator commands** (Door 0xA0/0x40, BCM 0x80 mode 0x2F+0xB4, Cluster 0x90, Radio 0x87, Liftgate 0xA1).
+`wj_tcm_emulator.py` provides a TCP server that emulates the ELM327 + vehicle bus for development without a real vehicle. Supports all modules, realistic timing, gear shift simulation, ECU/TCM security access, and **252 PCAP-verified responses** (Door 0xA0/0x40, BCM 0x80 mode 0x2F+0xB4, Cluster 0x90, Radio 0x87, Liftgate 0xA1).
 
 ```bash
 python3 wj_tcm_emulator.py --port 35000

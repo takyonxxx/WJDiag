@@ -1,228 +1,105 @@
 # WJ 2.7 CRD — Complete J1850 Actuator Relay Map
-## Verified from real vehicle + reference diagnostic tools
+## Verified from real vehicle PCAP captures (2026-03-12)
 
-**All hex commands verified from real vehicle testing.**
+**All responses verified from real vehicle WiFi ELM327 PCAP captures.**
 
----
+## Module Map — EU WJ 2.7 CRD 2003
 
-## DriverDoor Module — Address 0x40
+| Addr | Module | J1850 Read | Relay (0x2F) | Status |
+|------|--------|-----------|--------------|--------|
+| 0x28 | TCM (J1850) | YES | - | Read OK, some PIDs NRC |
+| 0x2A | EVIC/Overhead | **NO DATA** | - | Not on J1850 bus |
+| 0x40 | ABS/DriverDoor | YES | YES (bitmask) | Full relay control verified |
+| 0x58 | ESP/Traction | YES | - | NEW! 61 PIDs discovered |
+| 0x60 | Airbag | NRC 0x22 | - | conditionsNotCorrect always |
+| 0x61 | Compass/Traveler | YES | - | NEW! Has DTCs |
+| 0x68 | HVAC | YES | - | 13 PIDs verified |
+| 0x80 | BCM | **NO DATA** | untested | Not on J1850 read bus |
+| 0x98 | Memory Seat | YES (DTC only) | - | Only 24 00 00 responds |
+| 0xA0 | Door (LEFT/Driver) | YES | YES (sequential 0x12) | All 16 PIDs verified |
+| 0xA1 | Liftgate/HandsFree | YES | YES (intermittent) | Some NO DATA on retries |
+| 0xA7 | Siren/Security | YES | - | NEW! Has DTCs |
+| 0xC0 | VTSS/Park Assist | YES | - | 4 PIDs verified |
 
-**Session:** `ATSH244011` → `01 01 00`
-**IOControl:** `ATSH24402F`
-**Monitor:** `ATSH2440B4` → `28 07` (motor current), `28 3F 00` (position)
+## DriverDoor Module 0x40 — Mode 0x2F (Bitmask)
 
-| # | Actuator | ON Command | OFF Command |
-|---|---|---|---|
-| 1 | DdDriverFrontWindowDownRelay | `38 08 01` | `38 08 00` |
-| 2 | DdDriverFrontWindowUpRelay | `38 07 01` | `38 07 00` |
-| 3 | DdDriverLockRelay | `38 06 02` | `38 06 00` |
-| 4 | DdDriverMirrorDown | `38 02 01` | `38 02 00` |
-| 5 | DdDriverMirrorHeater | `38 06 08` | `38 06 00` |
-| 6 | DdDriverMirrorLeft | `38 06 10` | `38 06 00` |
-| 7 | DdDriverMirrorRight | `38 06 20` | `38 06 00` |
-| 8 | DdDriverMirrorUp | `38 0C 02` | `38 0C 00` |
-| 9 | DdDriverRearWindowDownRelay | `38 08 02` | `38 08 00` |
-| 10 | DdDriverRearWindowUpRelay | `38 06 04` | `38 06 00` |
-| 11 | DdDriverSwitchIllumination | `38 0D 01` | `38 0D 00` |
-| 12 | DdDriverUnlockRelay | `3A 02 FF` | — |
-| 13 | DdCourtesyLamp | (in code logic) | |
-| 14 | DdDriverFoldawayIn | (in code logic) | |
-| 15 | DdDriverFoldawayOut | (in code logic) | |
-| 16 | DdSetMemoryLED | (in code logic) | |
+Session: `ATSH244022` -> read, `ATSH24402F` -> relay control
+No DiagSession needed — relay works directly.
 
-**NOTE:** Register `06` is shared bitmask: Lock=02, MirrorHeat=08, MirrorL=10, MirrorR=20, RearWinUp=04.
+| Actuator | ON Command | Response | Notes |
+|----------|-----------|----------|-------|
+| MirrorRight | `38 06 20` | `26 40 6F 38 06 20 68` | Reg 06 bitmask |
+| FrontWinDown | `38 08 01` | `26 40 6F 38 08 01 1D` | |
+| FrontWinUp | `38 07 01` | `26 40 6F 38 07 01 BE` | |
+| Lock | `38 06 02` | `26 40 6F 38 06 02 D5` | Reg 06 bitmask |
+| MirrorDown | `38 02 01` | `26 40 6F 38 02 01 DF` | |
+| MirrorHeater | `38 06 08` | `26 40 6F 38 06 08 07` | Reg 06 bitmask |
+| MirrorLeft | `38 06 10` | `26 40 6F 38 06 10 22` | Reg 06 bitmask |
+| RearWinDown | `38 08 02` | `26 40 6F 38 08 02 3A` | |
+| RearWinUp | `38 06 04` | `26 40 6F 38 06 04 9B` | Reg 06 bitmask |
+| Illumination | `38 0D 01` | `26 40 6F 38 0D 01 7C` | |
+| Release All | `3A 02 FF` | `26 40 6F 3A 02 FF 05` | |
 
----
+Register 0x06 is shared bitmask: Lock=02, RearWinUp=04, MirrorHeat=08, MirrorL=10, MirrorR=20
 
-## PassengerDoor Module — Address 0xA0 (EU: LEFT/Driver door)
+## PassengerDoor Module 0xA0 — Mode 0x2F (Sequential 0x12)
 
-**IOControl:** `ATSH24A02F`
+Session: `ATSH24A022` -> read, `ATSH24A02F` -> relay control
+All 16 PIDs (0x00-0x0F) verified with real CRC from vehicle.
 
-| # | Actuator | ON Command | OFF Command |
-|---|---|---|---|
-| 0 | PdDriverFrontWindowDownRelay | `38 00 12` | `38 00 00` |
-| 1 | PdDriverFrontWindowUpRelay | `38 01 12` | `38 01 00` |
-| 2 | PdDriverLockRelay | `38 02 12` | `38 02 00` |
-| 3 | PdDriverMirrorDown | `38 03 12` | `38 03 00` |
-| 4 | PdDriverMirrorHeater | `38 04 12` | `38 04 00` |
-| 5 | PdDriverMirrorLeft | `38 05 12` | `38 05 00` |
-| 6 | PdDriverMirrorRight | `38 06 12` | `38 06 00` |
-| 7 | PdDriverMirrorUp | `38 07 12` | `38 07 00` |
-| 8 | PdDriverRearWindowDownRelay | `38 08 12` | `38 08 00` |
-| 9 | PdDriverRearWindowUpRelay | `38 09 12` | `38 09 00` |
-| 10 | PdDriverSwitchIllumination | `38 0A 12` | `38 0A 00` |
-| 11 | PdDriverUnlockRelay | `38 0B 12` | `38 0B 00` |
-| 12 | PdDriverFoldawayIn | `38 0C 12` | `38 0C 00` |
-| 13 | PdDriverFoldawayOut | `38 0D 12` | `38 0D 00` |
-| 14 | (Unknown) | `38 0E 12` | `38 0E 00` |
-| 15 | (Unknown) | `38 0F 12` | `38 0F 00` |
+| PID | Actuator | ON | OFF | Real CRC |
+|-----|----------|----|----|----------|
+| 0x00 | FrontWinDown | `38 00 12` | `38 00 00` | D0 / 27 |
+| 0x01 | FrontWinUp | `38 01 12` | `38 01 00` | 9C / 6B |
+| 0x02 | Lock | `38 02 12` | `38 02 00` | 48 / BF |
+| 0x03 | MirrorDown | `38 03 12` | `38 03 00` | 04 / F3 |
+| 0x04 | MirrorHeater | `38 04 12` | `38 04 00` | FD / 0A |
+| 0x05 | MirrorLeft | `38 05 12` | `38 05 00` | B1 / 46 |
+| 0x06 | MirrorRight | `38 06 12` | `38 06 00` | 65 / 92 |
+| 0x07 | MirrorUp | `38 07 12` | `38 07 00` | 29 / DE |
+| 0x08 | RearWinDown | `38 08 12` | `38 08 00` | 8A / 7D |
+| 0x09 | RearWinUp | `38 09 12` | `38 09 00` | C6 / 31 |
+| 0x0A | SwitchIllum | `38 0A 12` | `38 0A 00` | 12 / E5 |
+| 0x0B | Unlock | `38 0B 12` | `38 0B 00` | 5E / A9 |
+| 0x0C | FoldawayIn | `38 0C 12` | `38 0C 00` | A7 / 50 |
+| 0x0D | FoldawayOut | `38 0D 12` | `38 0D 00` | EB / 1C |
+| 0x0E | Unknown | `38 0E 12` | `38 0E 00` | 3F / C8 |
+| 0x0F | Unknown | `38 0F 12` | `38 0F 00` | 73 / 84 |
 
-**Pattern:** Sequential index 0x00-0x0F with fixed value `0x12`.
+## Liftgate Module 0xA1 — Mode 0x2F (Sequential 0x12, Intermittent)
 
----
+Some PIDs return NO DATA on first attempt — retries needed.
 
-## Liftgate Module — Address 0xA1
+| PID | Actuator | Response (when OK) | Notes |
+|-----|----------|--------------------|-------|
+| 0x01 | ? | `26 A1 6F 38 01 12 F6` | OK |
+| 0x02 | ? | sometimes NO DATA | Intermittent |
+| 0x04 | ? | sometimes NO DATA | Intermittent |
+| 0x05 | ? | `26 A1 6F 38 05 12 DB` | OK |
+| 0x06-0x0E | ? | positive | Most respond |
 
-**IOControl:** `ATSH24A12F`
+## ECU Actuator Control (K-Line SID 0x30)
 
-| # | Actuator | ON Command | OFF Command |
-|---|---|---|---|
-| 1 | | `38 01 12` | `38 01 00` |
-| 2 | | `38 02 12` | `38 02 00` |
-| 3 | | `38 03 12` | `38 03 00` |
-| 4 | | `38 04 12` | `38 04 00` |
-| 5 | | `38 05 12` | `38 05 00` |
-| 6 | | `38 06 12` | `38 06 00` |
-| 7 | | `38 07 12` | `38 07 00` |
-| 8 | | `38 08 12` | `38 08 00` |
-| 9 | | `38 09 12` | `38 09 00` |
-| 10 | | `38 0A 12` | `38 0A 00` |
-| 11 | | `38 0B 12` | `38 0B 00` |
+Format: `30 PID 07 VALUE_HI VALUE_LO` -> `70 PID 07 VALUE_HI VALUE_LO`
+Security unlock NOT required (seed=0000 when already in session).
 
----
+| PID | ON Value | OFF Value | Description |
+|-----|----------|-----------|-------------|
+| 0x11 | 13 88 (5000) | 00 00 | RPM limiter? |
+| 0x1C | 27 10 (10000) | 00 00 | Unknown |
+| 0x16 | 27 10 | 00 00 | Unknown |
+| 0x17 | 27 10 | 00 00 | Unknown |
+| 0x14 | 27 10 | 00 00 | Unknown |
+| 0x1A | 13 88 | 00 00 | Unknown |
+| 0x12 | 00 10 | 00 00 | Unknown |
+| 0x18 | 08 34 / 21 34 | 00 00 | Unknown |
 
-## BCM (Body Computer) — Address 0x80
+## Critical Notes
 
-### Mode 0x2F — Direct IOControl
-
-**IOControl:** `ATSH24802F`
-
-| # | Actuator | ON Command | OFF Command | Notes |
-|---|---|---|---|---|
-| 1 | BodyHazardflashers | `38 01 00` | `38 01 01` | INVERTED! |
-| 2 | BodyHiBeamrelay | `38 00 FF` | `38 00 00` | |
-| 3 | BodyHornrelay | `38 00 CC` | `38 00 00` | |
-| 4 | BodyLowbeamrelay | `38 02 05` | `38 02 00` | |
-| 5 | BodyParklamprelay | `38 09 00` | `38 09 01` | INVERTED! |
-
-### Mode 0xB4 — Extended Actuators
-
-**Pre-req:** `ATSH248022` → `28 0D 00` (read), then `ATSH2480B4` → `28 0D 01` (activate)
-
-| # | Actuator | ON Command | OFF Command |
-|---|---|---|---|
-| 1 | BodyRDefogrelay | `38 02 02` | `38 02 00` |
-| 2 | BodyRearfoglamprelay | `38 09 01` | `38 09 00` |
-| 3 | BodyVTSSlamp | `38 04 01` | `38 04 00` |
-| 4 | BodyHILOWwiperrelay | `38 04 02` | `38 04 00` |
-| 5 | BodyFrontFogLamps | `38 02 04` | `38 02 00` |
-| 6 | BodyViperrelay (wiper single) | `38 04 03` | `38 04 00` |
-| 7 | BodyChime | `38 02 03` | `38 02 00` |
-| 8 | BodyEUtuled (EU Daylights) | `38 04 04` | `38 04 00` |
-
-### Special Functions
-- **BodyReset:** `ATSH246031` (ECU Reset)
-- **BodyChangeCountryCode:** Special write function via `BodyCountrycodeTagJNI`
-
----
-
-## Cluster (Electro Mech Cluster) — 0x90
-
-### Mode 0x2F — Gauge Motor Test
-**IOControl:** `ATSH24902F`
-
-| # | Command | Function |
-|---|---|---|
-| 1 | `38 01 01` | Gauge Test 1 |
-| 2 | `38 01 02` | Gauge Test 2 |
-
-**Session:** `ATSH249011` (for DiagSession)
-
-### Mode 0x22 — Gauge Self-Test
-**Header:** `ATSH249022`
-
-| # | ON | OFF | Function |
-|---|---|---|---|
-| 1 | `3A 00 80` | `3A 00 00` | Speedometer |
-| 2 | `3A 00 40` | `3A 00 00` | Tachometer |
-| 3 | `3A 00 20` | `3A 00 00` | Fuel Gauge |
-| 4 | `3A 00 10` | `3A 00 00` | Temp Gauge |
-| 5 | `3A 00 08` | `3A 00 00` | Volts Gauge |
-| 6 | `3A 00 04` | `3A 00 00` | (Unknown) |
-| 7 | `3A 00 02` | `3A 00 00` | (Unknown) |
-| 8 | `3A 00 01` | `3A 00 00` | (Unknown) |
-| 9 | `3A 01 01` | `3A 01 00` | Oil Lamp |
-| 10 | `3A 01 02` | `3A 01 00` | ABS Lamp |
-| 11 | `3A 01 04` | `3A 01 00` | Check Engine Lamp |
-
----
-
-## Radio — 0x87
-
-**IOControl:** `ATSH24872F`
-
-| # | ON | OFF | Function |
-|---|---|---|---|
-| 1 | `38 18 01` | `38 18 00` | Mute |
-| 2 | `38 0D 02` | `38 0D 00` | Volume Up |
-| 3 | `38 0D 03` | `38 0D 00` | Volume Down |
-| 4 | `38 0A 01` | `38 0A 00` | Bass Test |
-
----
-
-## Memory Seat — 0x98
-
-**Session:** `ATSH249811`
-**Read:** `ATSH249822`
-**Save:** `ATSH249830` → `01 FF FF`, `02 FF FF`, `03 FF FF`
-**IOControl:** `ATSH24982F`
-
-| # | Command | Motor |
-|---|---|---|
-| 1 | `38 03 00` | Tilt Forward |
-| 2 | `38 04 00` | Tilt Back |
-| 3 | `38 07 00` | Slide Forward |
-| 4 | `38 08 00` | Slide Back |
-| 5 | `38 0B 00` | Recline Forward |
-| 6 | `38 0C 00` | Recline Back |
-| 7 | `38 0F 00` | (Unknown) |
-| 8 | `38 10 00` | (Unknown) |
-
----
-
-## VTSS (Vehicle Theft Security) — 0xC0
-
-**Session:** `ATSH24C011`
-**IOControl:** `ATSH24C02F` → `38 00 01`
-**Monitor:** `ATSH24C0B4` → `28 03 00`
-**Read PIDs:** `28 11 00` through `28 20 00` (16 PIDs)
-**Security:** `ATSH24C027`
-
----
-
-## EVIC (Overhead Console) — 0x2A
-
-**IOControl:** `ATSH242A2F` → `38 00 04`, `38 00 14`
-**Read:** `ATSH242A22` → `2A 0A 00`
-**Write:** `ATSH242AB7` → `2A 0A FF 00 00` (set) / `2A 0A 00 00 00` (clear)
-
----
-
-## SKIM — 0x62
-
-**Session:** `ATSH246211`
-**Functions:** SkimLamp, SkimReset
-
----
-
-## Airbag — 0x60
-
-**Read:** `ATSH246022` + `ATRA60` → `28 37 00`
-**Extended:** `ATSH2460B4` → `28 37 01`
-**Security:** `ATSH246027` → `7F 00 00`, `80 08 09`
-**DTC Clear:** `ATSH2460A3` → `0D 10 00`
-**Reset:** `ATSH246031`
-
----
-
-## EU WJ 2.7 CRD Mapping Notes
-
-On EU LHD vehicles:
 - **0xA0 = LEFT/DRIVER door** (labeled "Passenger Door" in US-spec tools)
-- **0x40 = ABS module** (labeled "Driver Door" in US-spec tools)
-- **Right door has NO J1850 module** — controlled via BCM hardwire
-
-For your Qt app Controls tab, use:
-- `ATSH24A02F` with PassengerDoor commands (`38 xx 12`) for LEFT door
-- DriverDoor 0x40 commands will NOT work on EU (that's ABS)
-- BCM 0x80 may not respond on EU spec — test with DiagSession first
+- **0x40 = ABS module with door relay capability** (labeled "Driver Door" in US-spec tools)
+- **Right door has NO J1850 module** — hardwired via BCM/master switch
+- **BCM (0x80) = NO DATA** confirmed from real vehicle PCAP
+- **EVIC (0x2A) = NO DATA** confirmed from real vehicle PCAP
+- **Airbag (0x60) = NRC 0x22** always — needs special conditions (ignition off?)
+- **ECU block 0x62 = LIVE DATA** (EB ED vs 8A 79 between sessions) not static calibration
