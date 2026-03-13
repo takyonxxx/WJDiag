@@ -9,7 +9,7 @@
 // ============================================================
 // WJ 2.7 CRD Multi-Protocol Multi-Module Diagnostics
 // K-Line (ATSP5): 0x15=MotorECU, 0x20=EPC
-// J1850 VPW (ATSP2): 0x28=TCM, 0x40=ABS, 0x60=Airbag ...
+// J1850 VPW (ATSP2): 0x28=ABS, 0x40=BodyComputer, 0x60=Airbag ...
 // ============================================================
 
 class WJDiagnostics : public QObject
@@ -30,21 +30,20 @@ public:
         MotorECU     = 0x15,   // Bosch EDC15C2 OM612
         KLineTCM     = 0x20,   // NAG1 722.6 K-Line erişim
         // J1850 VPW
-        TCM          = 0x28,   // NAG1 722.6 Transmission
+        ABS          = 0x28,   // ABS / TCM J1850
         EVIC         = 0x2A,   // Overhead Console / EVIC
-        ABS          = 0x40,   // ABS / ESP
+        BodyComputer = 0x40,   // Body Computer (hazard/horn/mirrors)
         Airbag       = 0x60,   // Airbag (ORC/AOSIM)
         SKIM         = 0x62,   // Immobilizer
         ATC          = 0x68,   // Klima (HVAC)
-        BCM          = 0x80,   // Body Computer
+        // 0x80 = DEAD on EU vehicle (NO DATA)
         Radio        = 0x87,   // Radyo / Ses
-        Cluster      = 0x90,   // Instrument Cluster
         MemSeat      = 0x98,   // Memory Seat/Mirror
-        Liftgate     = 0xA0,   // Power Liftgate
-        HandsFree    = 0xA1,   // HandsFree / Uconnect
+        DriverDoor   = 0xA0,   // Driver Door (left windows)
+        PassengerDoor= 0xA1,   // Passenger Door (right windows)
         ESP_Module  = 0x58,   // ESP/Traction Control
-        Compass      = 0x61,   // Compass/Traveler
-        Siren        = 0xA7,   // Siren/Security Module
+        Cluster      = 0x61,   // Instrument Cluster
+        RainSensor   = 0xA7,   // Rain Sensor
         ParkAssist   = 0xC0,   // VTSS/Park Assist
     };
     Q_ENUM(Module)

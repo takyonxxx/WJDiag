@@ -520,32 +520,28 @@ QWidget* MainWindow::createConnectionTab()
         {WJDiagnostics::Module::KLineTCM, "TCM (K-Line)",
          "K-Line 0x20 | NAG1 722.6 EGS52 | Security: swap+XOR", true},
         // J1850 VPW modules
-        {WJDiagnostics::Module::ABS, "ABS / ESP",
-         "J1850 0x40 | ATRA40 | SID 0x20/0x24/0x36", true},
+        {WJDiagnostics::Module::BodyComputer, "Body Computer",
+         "J1850 0x40 | ATRA40 | relay: hazard/horn/windows/mirrors", true},
         {WJDiagnostics::Module::Airbag, "Airbag (ORC)",
          "J1850 0x60 | ATRA60 | NRC 0x22 (needs special conditions)", true},
         {WJDiagnostics::Module::ATC, "Climate (HVAC)",
          "J1850 0x68 | ATRA68 | mode 0x22/0x31/0x33", true},
-        {WJDiagnostics::Module::BCM, "Body Computer",
-         "J1850 0x80 | ATRA80 | mode 0x2F/0xB4 (relays)", true},
         {WJDiagnostics::Module::MemSeat, "Memory Seat / Mirror",
          "J1850 0x98 | ATRA98 | DTC read verified", true},
-        {WJDiagnostics::Module::Liftgate, "Door Module (0xA0)",
+        {WJDiagnostics::Module::DriverDoor, "Driver Door",
          "J1850 0xA0 | ATRAA0 | mode 0x2F (windows/locks/mirrors)", true},
-        {WJDiagnostics::Module::HandsFree, "Liftgate / HandsFree",
-         "J1850 0xA1 | ATRAA1 | mode 0x2F/0x31/0x33", true},
-        {WJDiagnostics::Module::TCM, "TCM (J1850)",
-         "J1850 0x28 | ATRA28 | mode 0x10/0x22/0xA0/0x14/0x20/0x30", true},
+        {WJDiagnostics::Module::PassengerDoor, "Passenger Door",
+         "J1850 0xA1 | ATRAA1 | mode 0x2F (windows/locks/mirrors)", true},
+        {WJDiagnostics::Module::ABS, "ABS / TCM (J1850)",
+         "J1850 0x28 | ATRA28 | read + DTC clear", true},
         {WJDiagnostics::Module::ParkAssist, "VTSS / Park Assist",
          "J1850 0xC0 | ATRAC0 | mode 0x22/0x27/0x2F/0xB4", true},
         {WJDiagnostics::Module::ESP_Module, "ESP / Traction Control",
-         "J1850 0x58 | ATRA58 | SID 0x20/0x24/0x28/0x2E", true},
-        {WJDiagnostics::Module::Compass, "Compass / Traveler",
-         "J1850 0x61 | ATRA61 | SID 0x20/0x24/0x28", true},
-        {WJDiagnostics::Module::Siren, "Siren / Security",
-         "J1850 0xA7 | ATRAA7 | SID 0x20/0x24/0x28/0x2E", true},
-        {WJDiagnostics::Module::EVIC, "EVIC / Overhead Console",
-         "J1850 0x2A | ATRA2A | NO DATA on EU vehicle", true},
+         "J1850 0x58 | ATRA58 | read only", true},
+        {WJDiagnostics::Module::Cluster, "Instrument Cluster",
+         "J1850 0x61 | ATRA61 | gauge test via SID 0x3A", true},
+        {WJDiagnostics::Module::RainSensor, "Rain Sensor",
+         "J1850 0xA7 | ATRAA7 | read + DTC clear", true},
     };
 
     m_moduleButtons.clear();
@@ -923,11 +919,34 @@ void MainWindow::sendWindowCmd(const QString &label, const QString &relayCmd, bo
         return;
     }
 
-    auto sendRelay = [this, label, relayCmd, on]() {
-        m_elm->sendCommand(relayCmd, [this, label, on](const QString &resp) {
+    // During init, QUEUE the command (don't drop it!)
+    // This ensures OFF commands aren't lost when user releases during init
+    if (m_ctrlInitBusy) {
+        m_ctrlPendingCmd = relayCmd;
+        m_ctrlPendingLabel = label;
+        m_ctrlPendingOn = on;
+        return;
+    }
+
+    auto flushPending = [this]() {
+        if (m_ctrlPendingCmd.isEmpty()) return;
+        QString pc = m_ctrlPendingCmd;
+        QString pl = m_ctrlPendingLabel;
+        bool po = m_ctrlPendingOn;
+        m_ctrlPendingCmd.clear();
+        m_elm->sendCommand(pc, [this, pl, po](const QString &resp) {
+            bool ok = !resp.contains("NO DATA") && !resp.contains("ERROR");
+            QString status = pl + (po ? " ON: " : " OFF: ") + (ok ? "OK" : "FAIL");
+            onLogMessage(status + " -> " + resp.trimmed());
+        }, 2000);
+    };
+
+    auto sendRelay = [this, label, relayCmd, on, flushPending]() {
+        m_elm->sendCommand(relayCmd, [this, label, on, flushPending](const QString &resp) {
             bool ok = !resp.contains("NO DATA") && !resp.contains("ERROR");
             QString status = label + (on ? " ON: " : " OFF: ") + (ok ? "OK" : "FAIL");
             onLogMessage(status + " -> " + resp.trimmed());
+            flushPending();
         }, 2000);
     };
 
@@ -941,7 +960,7 @@ void MainWindow::sendWindowCmd(const QString &label, const QString &relayCmd, bo
             return;
         }
         m_ctrlActiveHdr = hdr;
-        // PCAP: full J1850 init then B4 activation
+        m_ctrlInitBusy = true;
         m_elm->sendCommand("ATSP2", [this, hdr, sendRelay](const QString &) {
         m_elm->sendCommand("ATIFR0", [this, hdr, sendRelay](const QString &) {
         m_elm->sendCommand("ATH1", [this, hdr, sendRelay](const QString &) {
@@ -952,6 +971,7 @@ void MainWindow::sendWindowCmd(const QString &label, const QString &relayCmd, bo
         m_elm->sendCommand(hdr, [this, sendRelay](const QString &) {
         m_elm->sendCommand("28 0D 01", [this, sendRelay](const QString &resp) {
             onLogMessage("BCM B4 activate: " + resp.trimmed());
+            m_ctrlInitBusy = false;
             sendRelay();
         });});});});});});});});
         return;
@@ -963,15 +983,21 @@ void MainWindow::sendWindowCmd(const QString &label, const QString &relayCmd, bo
         return;
     }
 
-    // Different module — PCAP shows full J1850 reinit each time:
-    // ATSP2 -> ATIFR0 -> ATH1 -> ATSH24xx2F -> relay
+    // Different module — full J1850 init with ATRA:
+    // ATSP2 -> ATIFR0 -> ATH1 -> ATSH24xx22 -> ATRAxx -> ATSH24xx2F -> relay
     m_ctrlActiveHdr = hdr;
-    m_elm->sendCommand("ATSP2", [this, hdr, sendRelay](const QString &) {
-    m_elm->sendCommand("ATIFR0", [this, hdr, sendRelay](const QString &) {
-    m_elm->sendCommand("ATH1", [this, hdr, sendRelay](const QString &) {
-    m_elm->sendCommand(hdr, [sendRelay](const QString &) {
+    m_ctrlInitBusy = true;
+    QString readHdr = "ATSH24" + targetHex + "22";
+    QString atra = "ATRA" + targetHex;
+    m_elm->sendCommand("ATSP2", [this, readHdr, atra, hdr, sendRelay](const QString &) {
+    m_elm->sendCommand("ATIFR0", [this, readHdr, atra, hdr, sendRelay](const QString &) {
+    m_elm->sendCommand("ATH1", [this, readHdr, atra, hdr, sendRelay](const QString &) {
+    m_elm->sendCommand(readHdr, [this, atra, hdr, sendRelay](const QString &) {
+    m_elm->sendCommand(atra, [this, hdr, sendRelay](const QString &) {
+    m_elm->sendCommand(hdr, [this, sendRelay](const QString &) {
+        m_ctrlInitBusy = false;
         sendRelay();
-    });});});});
+    });});});});});});
 }
 
 QWidget* MainWindow::createControlsTab()
@@ -1055,10 +1081,8 @@ QWidget* MainWindow::createControlsTab()
     //   0xA0 = LEFT/Driver door — sequential 38 xx 12
     //   0x40 = RIGHT/DriverDoor — bitmask commands
     //   0x80 = BCM — mode 0x2F + mode 0xB4
-    QString hdrL    = "ATSH24A02F";   // Left door 0xA0 mode 0x2F
-    QString hdrR    = "ATSH24402F";   // Right door 0x40 mode 0x2F
-    QString hdrBCM  = "ATSH24802F";   // BCM 0x80 mode 0x2F
-    QString hdrBCMB4 = "ATSH2480B4";  // BCM 0x80 mode 0xB4
+    QString hdrL    = "ATSH24A02F";   // Driver Door 0xA0 mode 0x2F
+    QString hdrR    = "ATSH24A12F";   // Passenger Door 0xA1 mode 0x2F
 
     QString grpStyle = "QGroupBox{color:#5888a8;font-size:10px;border:1px solid #2a5070;"
                        "border-radius:5px;margin-top:3px;padding-top:12px;}";
@@ -1070,7 +1094,7 @@ QWidget* MainWindow::createControlsTab()
     frontLay->setSpacing(4); frontLay->setContentsMargins(4,4,4,4);
 
     QLabel *flLbl = new QLabel("Left (0xA0)");
-    QLabel *frLbl = new QLabel("Right (0x40)");
+    QLabel *frLbl = new QLabel("Right (0xA1)");
     flLbl->setStyleSheet("color:#5888a8;font-size:10px;"); flLbl->setAlignment(Qt::AlignCenter);
     frLbl->setStyleSheet("color:#5888a8;font-size:10px;"); frLbl->setAlignment(Qt::AlignCenter);
     frontLay->addWidget(flLbl, 0, 0);
@@ -1079,8 +1103,8 @@ QWidget* MainWindow::createControlsTab()
     frontLay->addWidget(makeHoldBtn("L UP",   "38 01 12", "38 01 00", "L-Front Up",   hdrL), 1, 0);
     frontLay->addWidget(makeHoldBtn("L DOWN", "38 00 12", "38 00 00", "L-Front Down", hdrL), 2, 0);
     // Right front: 0x40 bitmask
-    frontLay->addWidget(makeHoldBtn("R UP",   "38 07 01", "38 07 00", "R-Front Up",   hdrR), 1, 1);
-    frontLay->addWidget(makeHoldBtn("R DOWN", "38 08 01", "38 08 00", "R-Front Down", hdrR), 2, 1);
+    frontLay->addWidget(makeHoldBtn("R UP",   "38 01 12", "38 01 00", "R-Front Up",   hdrR), 1, 1);
+    frontLay->addWidget(makeHoldBtn("R DOWN", "38 00 12", "38 00 00", "R-Front Down", hdrR), 2, 1);
     innerLay->addWidget(frontGrp);
 
     // ====== REAR WINDOWS ======
@@ -1090,7 +1114,7 @@ QWidget* MainWindow::createControlsTab()
     rearLay->setSpacing(4); rearLay->setContentsMargins(4,4,4,4);
 
     QLabel *rlLbl = new QLabel("Left (0xA0)");
-    QLabel *rrLbl = new QLabel("Right (0x40)");
+    QLabel *rrLbl = new QLabel("Right (0xA1)");
     rlLbl->setStyleSheet("color:#5888a8;font-size:10px;"); rlLbl->setAlignment(Qt::AlignCenter);
     rrLbl->setStyleSheet("color:#5888a8;font-size:10px;"); rrLbl->setAlignment(Qt::AlignCenter);
     rearLay->addWidget(rlLbl, 0, 0);
@@ -1099,52 +1123,36 @@ QWidget* MainWindow::createControlsTab()
     rearLay->addWidget(makeHoldBtn("L UP",   "38 09 12", "38 09 00", "L-Rear Up",   hdrL), 1, 0);
     rearLay->addWidget(makeHoldBtn("L DOWN", "38 08 12", "38 08 00", "L-Rear Down", hdrL), 2, 0);
     // Right rear: 0x40 bitmask
-    rearLay->addWidget(makeHoldBtn("R UP",   "38 06 04", "38 06 00", "R-Rear Up",   hdrR), 1, 1);
-    rearLay->addWidget(makeHoldBtn("R DOWN", "38 08 02", "38 08 00", "R-Rear Down", hdrR), 2, 1);
+    rearLay->addWidget(makeHoldBtn("R UP",   "38 09 12", "38 09 00", "R-Rear Up",   hdrR), 1, 1);
+    rearLay->addWidget(makeHoldBtn("R DOWN", "38 08 12", "38 08 00", "R-Rear Down", hdrR), 2, 1);
     innerLay->addWidget(rearGrp);
 
     // ====== HAZARD & HORN (BCM 0x80 mode 0x2F) ======
-    QGroupBox *hazGrp = new QGroupBox("Hazard / Horn (BCM 0x80)");
+    QString hdrBCM = "ATSH24402F";   // Body Computer 0x40 mode 0x2F
+    QGroupBox *hazGrp = new QGroupBox("Hazard / Horn (Body 0x40)");
     hazGrp->setStyleSheet(grpStyle);
     QHBoxLayout *hazLay = new QHBoxLayout(hazGrp);
     hazLay->setSpacing(4); hazLay->setContentsMargins(4,4,4,4);
-    // Hazard INVERTED: ON=38 01 00, OFF=38 01 01
     hazLay->addWidget(makeBCMBtn("HAZARD", "38 01 00", "38 01 01", "Hazard", hdrBCM));
-    // Horn: hold to honk
     hazLay->addWidget(makeHoldBtn("HORN", "38 00 CC", "38 00 00", "Horn", hdrBCM));
     innerLay->addWidget(hazGrp);
 
-    // ====== BCM mode 0x2F — Direct IOControl ======
-    QGroupBox *bcmGrp = new QGroupBox("BCM (0x80) mode 0x2F");
-    bcmGrp->setStyleSheet(grpStyle);
-    QGridLayout *bcmLay = new QGridLayout(bcmGrp);
-    bcmLay->setSpacing(4); bcmLay->setContentsMargins(4,4,4,4);
-    // Horn=38 00 CC/00, HiBeam=38 00 FF/00, LowBeam=38 02 05/00
-    bcmLay->addWidget(makeHoldBtn("Horn",     "38 00 CC", "38 00 00", "Horn",    hdrBCM), 0, 0);
-    bcmLay->addWidget(makeBCMBtn("Hi Beam",   "38 00 FF", "38 00 00", "HiBeam",  hdrBCM), 0, 1);
-    bcmLay->addWidget(makeBCMBtn("Low Beam",  "38 02 05", "38 02 00", "LowBeam", hdrBCM), 0, 2);
-    // Hazard=38 01 00/01 (INVERTED!), ParkLamp=38 09 00/01 (INVERTED!)
-    bcmLay->addWidget(makeBCMBtn("Hazard",    "38 01 00", "38 01 01", "Hazard",   hdrBCM), 1, 0);
-    bcmLay->addWidget(makeBCMBtn("Park Lamp", "38 09 00", "38 09 01", "ParkLamp", hdrBCM), 1, 1);
-    innerLay->addWidget(bcmGrp);
+    // ====== INSTRUMENT CLUSTER 0x61 — Gauge Test ======
+    QString hdrClust = "ATSH246122";  // Cluster 0x61 mode 0x22 (SID 0x3A)
+    QGroupBox *clustGrp = new QGroupBox("Cluster Gauge Test (0x61)");
+    clustGrp->setStyleSheet(grpStyle);
+    QGridLayout *clustLay = new QGridLayout(clustGrp);
+    clustLay->setSpacing(4); clustLay->setContentsMargins(4,4,4,4);
+    // SID 0x3A gauge commands — verified from modules_activation.pcap
+    clustLay->addWidget(makeBCMBtn("Speedo",   "3A 00 80", "3A 00 00", "Speedo",  hdrClust), 0, 0);
+    clustLay->addWidget(makeBCMBtn("Tacho",    "3A 00 40", "3A 00 00", "Tacho",   hdrClust), 0, 1);
+    clustLay->addWidget(makeBCMBtn("Oil Lamp", "3A 01 01", "3A 01 00", "OilLamp", hdrClust), 0, 2);
+    clustLay->addWidget(makeBCMBtn("CE Lamp",  "3A 01 04", "3A 01 00", "CELamp",  hdrClust), 1, 0);
+    clustLay->addWidget(makeBCMBtn("Fuel",     "3A 00 08", "3A 00 00", "FuelGauge", hdrClust), 1, 1);
+    clustLay->addWidget(makeBCMBtn("Temp",     "3A 00 04", "3A 00 00", "TempGauge", hdrClust), 1, 2);
+    innerLay->addWidget(clustGrp);
 
-    // ====== BCM mode 0xB4 — Extended Actuators ======
-    QGroupBox *bcmB4Grp = new QGroupBox("BCM (0x80) mode 0xB4");
-    bcmB4Grp->setStyleSheet(grpStyle);
-    QGridLayout *b4Lay = new QGridLayout(bcmB4Grp);
-    b4Lay->setSpacing(4); b4Lay->setContentsMargins(4,4,4,4);
-    // RDefog=38 02 02/00, RearFog=38 09 01/00, FrontFog=38 02 04/00
-    b4Lay->addWidget(makeBCMBtn("R Defog",   "38 02 02", "38 02 00", "RDefog",   hdrBCMB4), 0, 0);
-    b4Lay->addWidget(makeBCMBtn("Rear Fog",  "38 09 01", "38 09 00", "RearFog",  hdrBCMB4), 0, 1);
-    b4Lay->addWidget(makeBCMBtn("Front Fog", "38 02 04", "38 02 00", "FrontFog", hdrBCMB4), 0, 2);
-    // Wiper=38 04 02/00, VTSS=38 04 01/00, Chime=38 02 03/00, EU Dayl=38 04 04/00
-    b4Lay->addWidget(makeBCMBtn("Wiper",     "38 04 02", "38 04 00", "Wiper",    hdrBCMB4), 1, 0);
-    b4Lay->addWidget(makeBCMBtn("VTSS Lamp", "38 04 01", "38 04 00", "VTSSLamp", hdrBCMB4), 1, 1);
-    b4Lay->addWidget(makeBCMBtn("Chime",     "38 02 03", "38 02 00", "Chime",    hdrBCMB4), 1, 2);
-    b4Lay->addWidget(makeBCMBtn("EU Dayl",   "38 04 04", "38 04 00", "EUDayl",   hdrBCMB4), 2, 0);
-    // Viper(single wipe)=38 04 03/00
-    b4Lay->addWidget(makePulseBtn("Wipe 1x", "38 04 03", "38 04 00", "Viper1x", hdrBCMB4), 2, 1);
-    innerLay->addWidget(bcmB4Grp);
+
 
     innerLay->addStretch();
     scroll->setWidget(inner);
@@ -1676,86 +1684,86 @@ void MainWindow::runDiscoveryPhases(
     auto steps = std::make_shared<QList<Step>>();
 
     // =================================================================
-    // RAW TEST — Only UNVERIFIED commands (not in PCAP captures)
-    // PCAP-verified relay commands are in Controls tab — use those instead.
-    // These tests need real vehicle verification:
-    // - BCM 0x80 mode 0x2F: Horn/Hazard/Beams (from APK binary only)
-    // - BCM 0x80 mode 0xB4: Fog/Wiper/Defog (from APK binary only)
-    // - Cluster 0x90: gauge sweep (from APK binary only)
-    // - Radio 0x87: mute/volume (from APK binary only)
-    // - ECU 0x15 SID 0x30: actuator control (from PCAP1 but untested)
+    // RAW TEST — Real vehicle verification
+    // All J1850 commands MUST have ATRA set (NO DATA without it)
     // =================================================================
     steps->append(Step{"", "switch:j1850"});
 
-    // --- BCM 0x80 mode 0x2F (NOT in PCAP — needs real vehicle test) ---
-    steps->append(Step{"", "header:=== BCM 0x80 mode 0x2F (UNVERIFIED) ==="});
-    steps->append(Step{"", "j1850hdr:ATSH248011"});
-    steps->append(Step{"", "j1850hdr:ATRA80"});
-    steps->append(Step{"BCM Session",       "j1850cmd:01 01 00"});
-    steps->append(Step{"", "j1850hdr:ATSH24802F"});
-    steps->append(Step{"BCM Hazard ON",     "j1850cmd:38 01 00"});
-    steps->append(Step{"BCM Hazard OFF",    "j1850cmd:38 01 01"});
-    steps->append(Step{"BCM HiBeam ON",     "j1850cmd:38 00 FF"});
-    steps->append(Step{"BCM HiBeam OFF",    "j1850cmd:38 00 00"});
-    steps->append(Step{"BCM Horn ON",       "j1850cmd:38 00 CC"});
-    steps->append(Step{"BCM Horn OFF",      "j1850cmd:38 00 00"});
-    steps->append(Step{"BCM LowBeam ON",    "j1850cmd:38 02 05"});
-    steps->append(Step{"BCM LowBeam OFF",   "j1850cmd:38 02 00"});
-    steps->append(Step{"BCM ParkLamp ON",   "j1850cmd:38 09 00"});
-    steps->append(Step{"BCM ParkLamp OFF",  "j1850cmd:38 09 01"});
+    // --- 1. Driver Door 0xA0 windows ---
+    steps->append(Step{"", "header:=== Driver Door 0xA0 Windows ==="});
+    steps->append(Step{"", "j1850hdr:ATSH24A022"});
+    steps->append(Step{"", "j1850hdr:ATRAA0"});
+    steps->append(Step{"", "j1850hdr:ATSH24A02F"});
+    steps->append(Step{"L-FrontUp ON",      "j1850cmd:38 01 12"});
+    steps->append(Step{"L-FrontUp ON",      "j1850cmd:38 01 12"});
+    steps->append(Step{"L-FrontUp ON",      "j1850cmd:38 01 12"});
+    steps->append(Step{"L-FrontUp OFF",     "j1850cmd:38 01 00"});
+    steps->append(Step{"L-FrontDn ON",      "j1850cmd:38 00 12"});
+    steps->append(Step{"L-FrontDn ON",      "j1850cmd:38 00 12"});
+    steps->append(Step{"L-FrontDn ON",      "j1850cmd:38 00 12"});
+    steps->append(Step{"L-FrontDn OFF",     "j1850cmd:38 00 00"});
+    steps->append(Step{"L-RearUp ON",       "j1850cmd:38 09 12"});
+    steps->append(Step{"L-RearUp ON",       "j1850cmd:38 09 12"});
+    steps->append(Step{"L-RearUp OFF",      "j1850cmd:38 09 00"});
+    steps->append(Step{"L-RearDn ON",       "j1850cmd:38 08 12"});
+    steps->append(Step{"L-RearDn ON",       "j1850cmd:38 08 12"});
+    steps->append(Step{"L-RearDn OFF",      "j1850cmd:38 08 00"});
 
-    // --- BCM 0x80 mode 0xB4 (NOT in PCAP — needs real vehicle test) ---
-    steps->append(Step{"", "header:=== BCM 0x80 mode 0xB4 (UNVERIFIED) ==="});
-    steps->append(Step{"", "j1850hdr:ATSH248022"});
-    steps->append(Step{"", "j1850hdr:ATRA80"});
-    steps->append(Step{"BCM B4 pre-read",   "j1850cmd:28 0D 00"});
-    steps->append(Step{"", "j1850hdr:ATSH2480B4"});
-    steps->append(Step{"BCM B4 activate",   "j1850cmd:28 0D 01"});
-    steps->append(Step{"BCM RDefog ON",     "j1850cmd:38 02 02"});
-    steps->append(Step{"BCM RDefog OFF",    "j1850cmd:38 02 00"});
-    steps->append(Step{"BCM RearFog ON",    "j1850cmd:38 09 01"});
-    steps->append(Step{"BCM RearFog OFF",   "j1850cmd:38 09 00"});
-    steps->append(Step{"BCM FrontFog ON",   "j1850cmd:38 02 04"});
-    steps->append(Step{"BCM FrontFog OFF",  "j1850cmd:38 02 00"});
-    steps->append(Step{"BCM VTSS ON",       "j1850cmd:38 04 01"});
-    steps->append(Step{"BCM VTSS OFF",      "j1850cmd:38 04 00"});
-    steps->append(Step{"BCM Wiper ON",      "j1850cmd:38 04 02"});
-    steps->append(Step{"BCM Wiper OFF",     "j1850cmd:38 04 00"});
-    steps->append(Step{"BCM Chime ON",      "j1850cmd:38 02 03"});
-    steps->append(Step{"BCM Chime OFF",     "j1850cmd:38 02 00"});
-    steps->append(Step{"BCM EUDayl ON",     "j1850cmd:38 04 04"});
-    steps->append(Step{"BCM EUDayl OFF",    "j1850cmd:38 04 00"});
-    steps->append(Step{"BCM Viper1x ON",    "j1850cmd:38 04 03"});
-    steps->append(Step{"BCM Viper1x OFF",   "j1850cmd:38 04 00"});
+    // --- 2. Passenger Door 0xA1 windows (same sequential pattern) ---
+    steps->append(Step{"", "header:=== Passenger Door 0xA1 Windows ==="});
+    steps->append(Step{"", "j1850hdr:ATSH24A122"});
+    steps->append(Step{"", "j1850hdr:ATRAA1"});
+    steps->append(Step{"", "j1850hdr:ATSH24A12F"});
+    steps->append(Step{"R-FrontUp ON",      "j1850cmd:38 01 12"});
+    steps->append(Step{"R-FrontUp ON",      "j1850cmd:38 01 12"});
+    steps->append(Step{"R-FrontUp ON",      "j1850cmd:38 01 12"});
+    steps->append(Step{"R-FrontUp OFF",     "j1850cmd:38 01 00"});
+    steps->append(Step{"R-FrontDn ON",      "j1850cmd:38 00 12"});
+    steps->append(Step{"R-FrontDn ON",      "j1850cmd:38 00 12"});
+    steps->append(Step{"R-FrontDn ON",      "j1850cmd:38 00 12"});
+    steps->append(Step{"R-FrontDn OFF",     "j1850cmd:38 00 00"});
+    steps->append(Step{"R-RearUp ON",       "j1850cmd:38 09 12"});
+    steps->append(Step{"R-RearUp ON",       "j1850cmd:38 09 12"});
+    steps->append(Step{"R-RearUp OFF",      "j1850cmd:38 09 00"});
+    steps->append(Step{"R-RearDn ON",       "j1850cmd:38 08 12"});
+    steps->append(Step{"R-RearDn ON",       "j1850cmd:38 08 12"});
+    steps->append(Step{"R-RearDn OFF",      "j1850cmd:38 08 00"});
 
-    // --- Cluster 0x90 gauge sweep (NOT in PCAP — needs real vehicle test) ---
-    steps->append(Step{"", "header:=== Cluster 0x90 gauge test (UNVERIFIED) ==="});
-    steps->append(Step{"", "j1850hdr:ATSH24902F"});
-    steps->append(Step{"", "j1850hdr:ATRA90"});
-    steps->append(Step{"Clust Test1",       "j1850cmd:38 01 01"});
-    steps->append(Step{"Clust Test2",       "j1850cmd:38 01 02"});
-    steps->append(Step{"", "j1850hdr:ATSH249022"});
-    steps->append(Step{"Speedo ON",         "j1850cmd:3A 00 80"});
-    steps->append(Step{"Speedo OFF",        "j1850cmd:3A 00 00"});
-    steps->append(Step{"Tacho ON",          "j1850cmd:3A 00 40"});
-    steps->append(Step{"Tacho OFF",         "j1850cmd:3A 00 00"});
-    steps->append(Step{"Oil Lamp ON",       "j1850cmd:3A 01 01"});
-    steps->append(Step{"Oil Lamp OFF",      "j1850cmd:3A 01 00"});
-    steps->append(Step{"CE Lamp ON",        "j1850cmd:3A 01 04"});
-    steps->append(Step{"CE Lamp OFF",       "j1850cmd:3A 01 00"});
+    // --- 3. Body Computer 0x40 relay (hazard/horn/lights) ---
+    steps->append(Step{"", "header:=== Body Computer 0x40 Relay ==="});
+    steps->append(Step{"", "j1850hdr:ATSH244022"});
+    steps->append(Step{"", "j1850hdr:ATRA40"});
+    steps->append(Step{"", "j1850hdr:ATSH24402F"});
+    steps->append(Step{"Horn ON",           "j1850cmd:38 00 CC"});
+    steps->append(Step{"Horn OFF",          "j1850cmd:38 00 00"});
+    steps->append(Step{"Hazard ON",         "j1850cmd:38 01 00"});
+    steps->append(Step{"Hazard OFF",        "j1850cmd:38 01 01"});
+    steps->append(Step{"HiBeam ON",         "j1850cmd:38 00 FF"});
+    steps->append(Step{"HiBeam OFF",        "j1850cmd:38 00 00"});
+    steps->append(Step{"LowBeam ON",        "j1850cmd:38 02 05"});
+    steps->append(Step{"LowBeam OFF",       "j1850cmd:38 02 00"});
+    steps->append(Step{"ParkLamp ON",       "j1850cmd:38 09 00"});
+    steps->append(Step{"ParkLamp OFF",      "j1850cmd:38 09 01"});
+    steps->append(Step{"MirrorR ON",        "j1850cmd:38 06 20"});
+    steps->append(Step{"MirrorR OFF",       "j1850cmd:38 06 00"});
+    steps->append(Step{"Illum ON",          "j1850cmd:38 0D 01"});
+    steps->append(Step{"Illum OFF",         "j1850cmd:38 0D 00"});
+    steps->append(Step{"Release All",       "j1850cmd:3A 02 FF"});
 
-    // --- Radio 0x87 (NOT in PCAP — needs real vehicle test) ---
-    steps->append(Step{"", "header:=== Radio 0x87 (UNVERIFIED) ==="});
-    steps->append(Step{"", "j1850hdr:ATSH24872F"});
-    steps->append(Step{"", "j1850hdr:ATRA87"});
-    steps->append(Step{"Radio Mute ON",     "j1850cmd:38 18 01"});
-    steps->append(Step{"Radio Mute OFF",    "j1850cmd:38 18 00"});
-    steps->append(Step{"Radio VolUp",       "j1850cmd:38 0D 02"});
-    steps->append(Step{"Radio VolDn",       "j1850cmd:38 0D 03"});
-    steps->append(Step{"Radio Vol OFF",     "j1850cmd:38 0D 00"});
+    // --- 4. DTC Clear (mode 0x14) ---
+    steps->append(Step{"", "header:=== DTC Clear (mode 0x14) ==="});
+    steps->append(Step{"", "j1850hdr:ATSH244014"});
+    steps->append(Step{"", "j1850hdr:ATRA40"});
+    steps->append(Step{"Body DTC Clear",    "j1850cmd:FF 00 00"});
+    steps->append(Step{"", "j1850hdr:ATSH242814"});
+    steps->append(Step{"", "j1850hdr:ATRA28"});
+    steps->append(Step{"ABS DTC Clear",     "j1850cmd:FF 00 00"});
+    steps->append(Step{"", "j1850hdr:ATSH24A714"});
+    steps->append(Step{"", "j1850hdr:ATRAA7"});
+    steps->append(Step{"RainSens DTC Clear","j1850cmd:FF 00 00"});
 
-    // --- ECU SID 0x30 actuators (in PCAP1 but physical effect unknown) ---
-    steps->append(Step{"", "header:=== ECU 0x15 SID 0x30 actuators (UNVERIFIED) ==="});
+    // --- 5. ECU SID 0x30 actuators (K-Line) ---
+    steps->append(Step{"", "header:=== ECU 0x15 SID 0x30 actuators ==="});
     steps->append(Step{"", "switch:kline"});
     steps->append(Step{"", "header:ECU security unlock required first"});
     steps->append(Step{"ECU PID 0x11 ON",   "kwpcmd:30 11 07 13 88"});

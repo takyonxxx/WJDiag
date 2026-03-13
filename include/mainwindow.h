@@ -123,7 +123,11 @@ private:
     QLabel *m_airbagDtcCountLabel=nullptr;
     // Controls tab
     QLabel *m_ctrlStatusLabel=nullptr;
-    QString m_ctrlActiveHdr;  // currently set J1850 header for controls
+    QString m_ctrlActiveHdr;
+    bool m_ctrlInitBusy = false;
+    QString m_ctrlPendingCmd;
+    QString m_ctrlPendingLabel;
+    bool m_ctrlPendingOn = false;  // currently set J1850 header for controls
     QTextEdit *m_logText;
     QPushButton *m_rawDumpBtn, *m_rawSendBtn;
     QLineEdit *m_rawCmdEdit;

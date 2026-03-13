@@ -3,73 +3,59 @@
 ## Vehicle: 2003 EU-spec WJ 2.7 CRD (OM612 / NAG1)
 
 Qt6 cross-platform diagnostic application communicating via ELM327 (Bluetooth/WiFi).
-Supports K-Line (ISO 14230) and J1850 VPW protocols.
 
 ## Module Map — EU WJ 2.7 CRD
 
-| Addr | Module | Bus | Status |
-|------|--------|-----|--------|
-| 0x15 | Engine ECU (EDC15C2) | K-Line | Full data + security |
-| 0x20 | TCM (NAG1 722.6) | K-Line | Full data + security |
-| 0x28 | TCM (J1850) | J1850 | Read OK |
-| 0x40 | ABS / Door RIGHT | J1850 | Full read + relay |
-| 0x58 | ESP / Traction | J1850 | Read OK |
-| 0x60 | Airbag (ORC) | J1850 | NRC 0x22 (needs special conditions) |
-| 0x61 | Compass / Traveler | J1850 | Read + DTCs |
-| 0x68 | Climate (HVAC) | J1850 | Read OK |
-| 0x80 | BCM Body Computer | J1850 | Relay control only |
-| 0x98 | Memory Seat | J1850 | DTC read only |
-| 0xA0 | Door LEFT (Driver) | J1850 | Full read + 16 relay PIDs |
-| 0xA1 | Liftgate / HandsFree | J1850 | Read + relay |
-| 0xA7 | Siren / Security | J1850 | Read + DTCs |
-| 0xC0 | VTSS / Park Assist | J1850 | Read OK |
-| 0x2A | EVIC Overhead | J1850 | No response on EU vehicle |
+| Ref App Menu | Addr | Bus | Status |
+|---|---|---|---|
+| Engine ECU | K-Line 0x15 | ISO 14230 | Full data + security + DTC |
+| Transmission | K-Line 0x20 | ISO 14230 | Full data + security + DTC |
+| ABS / TCM | J1850 0x28 | VPW | Read + DTC clear |
+| Body Computer | J1850 0x40 | VPW | Read + relay (hazard/horn/lights/mirrors) |
+| ESP / Traction | J1850 0x58 | VPW | Read only |
+| Airbag (ORC) | J1850 0x60 | VPW | NRC 0x22 always |
+| Instrument Cluster | J1850 0x61 | VPW | Gauge test via SID 0x3A |
+| Climate (HVAC) | J1850 0x68 | VPW | Read OK |
+| Memory Seat | J1850 0x98 | VPW | DTC read only |
+| Driver Door | J1850 0xA0 | VPW | Read + relay (left windows/locks/mirrors) |
+| Passenger Door | J1850 0xA1 | VPW | Read + relay (right windows/locks/mirrors) |
+| Rain Sensor | J1850 0xA7 | VPW | Read + DTC clear |
+| Park Assist | J1850 0xC0 | VPW | Read OK |
+
+Dead modules: 0x80 (NO DATA), 0x2A Overhead Console (NO DATA)
 
 ## Controls Tab
 
-- **Front Windows**: Left (0xA0) + Right (0x40) — hold to activate
-- **Rear Windows**: Left (0xA0) + Right (0x40) — hold to activate
-- **Hazard**: BCM 0x80 toggle (inverted: ON=0x00, OFF=0x01)
-- **Horn**: BCM 0x80 hold to honk
-- **BCM Lights**: Hi Beam, Low Beam, Park Lamp
-- **BCM Extended (0xB4)**: Rear Defog, Fog lights, Wiper, VTSS, Chime, EU Daylights
+- **Front Windows**: Left (0xA0 sequential) + Right (0xA1 sequential) — hold to activate
+- **Rear Windows**: Left (0xA0) + Right (0xA1) — hold to activate
+- **Hazard / Horn**: Body Computer 0x40 — toggle/hold
+- **Cluster Gauge Test**: Speedo, Tacho, Lamps via 0x61
 
-Dashboard automatically hides when Controls tab is active.
-
-No DiagSession required for relay commands — direct header switch.
+Both doors use same sequential pattern: `38 PID 12` ON, `38 PID 00` OFF.
+ATRA (receive address filter) is mandatory for all J1850 commands.
 
 ## Live Data
 
-- **ECU**: RPM, Coolant, IAT, TPS, MAP, Rail Pressure, Injection Qty, Boost
-- **TCM**: Input/Output RPM, Gear, Torque, Shift data, Fluid temp
+ECU blocks: 0x12, 0x30, 0x22, 0x20, 0x23, 0x21, 0x16, 0x32, 0x37, 0x13, 0x36, 0x26, 0x34, 0x62, 0xB0, 0xB1, 0xB2
+TCM blocks: 0x30, 0x31, 0x34, 0x33, 0x32
 
-Note: MAF reads 0 at idle — OM612 is MAP-based, this is normal.
+## DTC Management
+
+- ECU (K-Line): `14 00 00` → `54 00 00` (instant)
+- TCM (K-Line): `14 00 00` → `7F 14 78` (pending) → retry needed
+- Body Computer 0x40: `ATSH244014` → `FF 00 00`
+- ABS 0x28: `ATSH242814` → `FF 00 00`
+- Rain Sensor 0xA7: `ATSH24A714` → `FF 00 00`
 
 ## ESP32-S2 Emulator
 
-WiFi AP emulator for development and testing without a real vehicle.
-
-- **Hardware**: SparkFun ESP32-S2 Thing Plus C
-- **WiFi**: AP "WiFi_OBDII", IP 192.168.0.10, TCP port 35000
-- **HTTP Dashboard**: http://192.168.0.10/ — live status with auto-refresh
-- **Serial**: 115200 baud USB CDC logging
-
-## Files
-
-| File | Description |
-|------|-------------|
-| `mainwindow.cpp/.h` | Qt UI — Controls, live data, raw test |
-| `wjdiagnostics.cpp/.h` | Module management, 15 modules |
-| `elm327_emu.cpp/.h` | ESP32 emulator core |
-| `main.cpp` | ESP32 WiFi AP, TCP server, HTTP dashboard |
-| `platformio.ini` | PlatformIO config |
-| `wj_tcm_emulator.py` | Python TCP emulator |
-| `RELAY_MAP.md` | Actuator command reference |
+WiFi AP "WiFi_OBDII", IP 192.168.0.10, TCP port 35000, HTTP dashboard.
 
 ## Protocol Notes
 
-- **CRC-16/MODBUS** (poly=0xA001, init=0xFFFF) — RS485 bus standard, never change
-- **J1850 VPW** — ATSP2, header format 24XXYY (XX=target, YY=mode)
-- **K-Line ISO 14230** — ATSP5, KWP2000 with length+address framing
-- **0xA0 = LEFT/Driver door** (US tools mislabel as "Passenger Door")
-- **Right door has no dedicated J1850 module** — controlled via 0x40
+- CRC-16/MODBUS (poly=0xA001, init=0xFFFF) — never change
+- J1850 VPW: ATSP2, header 24XXYY (XX=target, YY=mode)
+- K-Line ISO 14230: ATSP5, KWP2000 framing
+- 0xA0 = Driver Door (LEFT), 0xA1 = Passenger Door (RIGHT)
+- 0x40 = Body Computer (NOT ABS — hazard/horn/lights/mirrors are here)
+- 0x61 = Instrument Cluster (gauge test via SID 0x3A)

@@ -29,11 +29,11 @@ QList<WJDiagnostics::ModuleInfo> WJDiagnostics::allModules()
          BusType::KLine, "ATSH8120F1", "ATWM8120F13E", "ATSP5", ""},
 
         // J1850 VPW modules - headers + ATRA filters
-        {Module::TCM, "NAG1 722.6 Transmission (EGS52)", "TCM",
+        {Module::ABS, "NAG1 722.6 Transmission (EGS52)", "TCM",
          BusType::J1850, "ATSH242822", "", "ATSP2", "ATRA28"},
         {Module::EVIC, "Overhead Console (EVIC)", "EVIC",
          BusType::J1850, "ATSH242A22", "", "ATSP2", "ATRA2A"},
-        {Module::ABS, "ABS / ESP Braking", "ABS",
+        {Module::BodyComputer, "Body Computer / ESP Braking", "ABS",
          BusType::J1850, "ATSH244022", "", "ATSP2", "ATRA40"},
         {Module::Airbag, "Airbag (ORC/AOSIM)", "Airbag",
          BusType::J1850, "ATSH246022", "", "ATSP2", "ATRA60"},
@@ -41,7 +41,7 @@ QList<WJDiagnostics::ModuleInfo> WJDiagnostics::allModules()
          BusType::J1850, "ATSH246222", "", "ATSP2", "ATRA62"},
         {Module::ATC, "Climate Control (HVAC)", "HVAC",
          BusType::J1850, "ATSH246822", "", "ATSP2", "ATRA68"},
-        {Module::BCM, "Body Computer (BCM)", "BCM",
+        {Module::BodyComputer, "Body Computer (BCM)", "BCM",
          BusType::J1850, "ATSH248022", "", "ATSP2", "ATRA80"},
         {Module::Radio, "Radio / Audio", "Radio",
          BusType::J1850, "ATSH248722", "", "ATSP2", "ATRA87"},
@@ -49,15 +49,15 @@ QList<WJDiagnostics::ModuleInfo> WJDiagnostics::allModules()
          BusType::J1850, "ATSH249022", "", "ATSP2", "ATRA90"},
         {Module::MemSeat, "Memory Seat / Mirror", "Seat",
          BusType::J1850, "ATSH249822", "", "ATSP2", "ATRA98"},
-        {Module::Liftgate, "Door Module (0xA0)", "Door",
+        {Module::DriverDoor, "Door Module (0xA0)", "Door",
          BusType::J1850, "ATSH24A022", "", "ATSP2", "ATRAA0"},
-        {Module::HandsFree, "Liftgate / HandsFree", "HFM",
+        {Module::PassengerDoor, "Liftgate / HandsFree", "HFM",
          BusType::J1850, "ATSH24A122", "", "ATSP2", "ATRAA1"},
         {Module::ESP_Module, "ESP / Traction Control", "ESP",
          BusType::J1850, "ATSH245822", "", "ATSP2", "ATRA58"},
-        {Module::Compass, "Compass / Traveler", "Compass",
+        {Module::Cluster, "Instrument Cluster", "Cluster",
          BusType::J1850, "ATSH246122", "", "ATSP2", "ATRA61"},
-        {Module::Siren, "Siren / Security", "Siren",
+        {Module::RainSensor, "Siren / Security", "Siren",
          BusType::J1850, "ATSH24A722", "", "ATSP2", "ATRAA7"},
         {Module::ParkAssist, "VTSS / Park Assist", "VTSS",
          BusType::J1850, "ATSH24C022", "", "ATSP2", "ATRAC0"},
@@ -291,7 +291,7 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                             emit logMessage(QString("Active: %1 | %2").arg(info.shortName, info.atshHeader));
 
                             // J1850 DiagSession for modules that need it
-                            if (targetMod == Module::TCM) {
+                            if (targetMod == Module::ABS) {
                                 m_elm->sendCommand("ATSH242810", [this, done](const QString&) {
                                     QTimer::singleShot(100, this, [this, done]() {
                                     m_elm->sendCommand("02 00 00", [this, done](const QString &resp) {
@@ -308,7 +308,7 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                                     });
                                     });
                                 });
-                            } else if (targetMod == Module::BCM || targetMod == Module::Liftgate ||
+                            } else if (targetMod == Module::BodyComputer || targetMod == Module::DriverDoor ||
                                        targetMod == Module::Cluster || targetMod == Module::ParkAssist ||
                                        targetMod == Module::MemSeat) {
                                 uint8_t modAddr = static_cast<uint8_t>(targetMod);
@@ -388,7 +388,7 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                 // Door(0xA0): init via mode 0x11 (needed for IOControl)
                 // Cluster(0x90): init via mode 0x11 (needed for gauge test)
                 // VTSS(0xC0): init via mode 0x11 (needed for security)
-                if (targetMod == Module::TCM) {
+                if (targetMod == Module::ABS) {
                     m_elm->sendCommand("ATSH242810", [this, done](const QString&) {
                         QTimer::singleShot(100, this, [this, done]() {
                         m_elm->sendCommand("02 00 00", [this, done](const QString &resp) {
@@ -406,7 +406,7 @@ void WJDiagnostics::switchToModule(Module mod, std::function<void(bool)> done)
                         });
                         });
                     });
-                } else if (targetMod == Module::BCM || targetMod == Module::Liftgate ||
+                } else if (targetMod == Module::BodyComputer || targetMod == Module::DriverDoor ||
                            targetMod == Module::Cluster || targetMod == Module::ParkAssist ||
                            targetMod == Module::MemSeat) {
                     // Generic J1850 DiagSession: ATSH24xx11 -> 01 01 00 -> back to read header
@@ -1190,7 +1190,7 @@ QString WJDiagnostics::dtcDescription(const QString &code, Module src)
     if (src == Module::MotorECU || src == Module::KLineTCM) {
         if (ecuDtcs.contains(code)) return ecuDtcs[code];
     }
-    if (src == Module::TCM) {
+    if (src == Module::ABS) {
         if (tcmDtcs.contains(code)) return tcmDtcs[code];
     }
     if (src == Module::ABS) {
@@ -1199,7 +1199,7 @@ QString WJDiagnostics::dtcDescription(const QString &code, Module src)
     if (src == Module::Airbag) {
         if (airbagDtcs.contains(code)) return airbagDtcs[code];
     }
-    if (src == Module::BCM) {
+    if (src == Module::BodyComputer) {
         if (bcmDtcs.contains(code)) return bcmDtcs[code];
     }
 
