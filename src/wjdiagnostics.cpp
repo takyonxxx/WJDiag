@@ -490,50 +490,206 @@ void WJDiagnostics::readDTCs(Module mod, std::function<void(const QList<DTCEntry
                 if (cb) cb(r);
             });
         } else {
-            // J1850 DTC read: mode 0x18
-            uint8_t modAddr = static_cast<uint8_t>(mod);
-
-            // J1850 modules: mode 0x18 DTC read problematic
-            // ABS(0x28): NRC + disturbs controller (ABS lamp!)
-            // ESP(0x58): NRC 7F 18 11
-            // 0x60: all NRC
-            // Others: WJDiag Pro doesn't use mode 0x18 for any J1850 module
-            // DTC CLEAR still works for all (mode 0x14)
-            {
-                emit logMessage(QString("%1: DTC read not available (mode 0x18 not supported)")
-                    .arg(moduleInfo(mod).shortName));
-                QList<DTCEntry> dtcs;
-                emit dtcListReady(mod, dtcs);
-                if (cb) cb(dtcs);
-                return;
-            }
-
-            QString readHdr = QString("ATSH24%1%2")
-                .arg(modAddr, 2, 16, QChar('0')).arg("18").toUpper();
-            QString atraCmd = QString("ATRA%1")
-                .arg(modAddr, 2, 16, QChar('0')).toUpper();
-
-            m_elm->sendCommand(readHdr, [this, mod, modAddr, atraCmd, cb](const QString&) {
-                m_elm->sendCommand(atraCmd, [this, mod, modAddr, cb](const QString&) {
-                    m_elm->sendCommand("FF 00 00", [this, mod, modAddr, cb](const QString &resp) {
-                        QList<DTCEntry> dtcs;
-                        if (!resp.contains("NO DATA") && !resp.contains("ERROR") && !resp.contains("7F")) {
-                            dtcs = decodeJ1850DTCs(resp, mod);
-                        }
-                        emit logMessage(QString("%1 DTC read (mode 0x18): %2 codes")
-                            .arg(moduleInfo(mod).shortName).arg(dtcs.size()));
-                        // Restore read header
-                        QString restoreHdr = QString("ATSH24%1%2")
-                            .arg(modAddr, 2, 16, QChar('0')).arg("22").toUpper();
-                        m_elm->sendCommand(restoreHdr, [this, mod, dtcs, cb](const QString&) {
-                            emit dtcListReady(mod, dtcs);
-                            if (cb) cb(dtcs);
-                        });
-                    });
-                });
-            });
+            // J1850 DTC read: PID scan method (WJDiag Pro approach)
+            // Mode 0x18 is NOT supported by any J1850 module on WJ
+            // Instead: scan known DTC PID ranges via mode 0x22
+            // Each PID maps to a specific DTC code
+            // Response: 26 <src> 62 <D0> <D1> <D2> <CRC>
+            // D0 D1 = DTC raw code (J2012), D2 = occurrence/status
+            // D0 D1 = 0x0000 or 0xFFFF = no fault
+            readJ1850DTCsByPIDScan(mod, cb);
         }
     });
+}
+
+// --- J1850 DTC PID Scan Tables ---
+// Each entry: { PID_hi, PID_lo, "DTC_CODE" }
+// PID is sent as: 2E <hi> 00 or 2F <hi> 00 via mode 0x22
+// Response non-zero D0 D1 = DTC present, D2 = occurrence count
+
+struct J1850DtcPidEntry {
+    uint8_t pidHi;   // first byte of PID (e.g. 0x2E)
+    uint8_t pidLo;   // second byte (e.g. 0x10)
+    const char *dtcCode;
+};
+
+// ABS 0x28: PID range 2E 10 ~ 2E 30 (PCAP verified)
+static const J1850DtcPidEntry kAbsDtcPids[] = {
+    {0x2E,0x10,"C0031"}, // LF Sensor Circuit
+    {0x2E,0x11,"C0032"}, // LF Wheel Speed Signal
+    {0x2E,0x12,"C0035"}, // RF Sensor Circuit
+    {0x2E,0x13,"C0036"}, // RF Wheel Speed Signal
+    {0x2E,0x14,"C0041"}, // LR Sensor Circuit
+    {0x2E,0x15,"C0042"}, // LR Wheel Speed Signal
+    {0x2E,0x17,"C0045"}, // RR Sensor Circuit
+    {0x2E,0x21,"C0046"}, // RR Wheel Speed Signal
+    {0x2E,0x22,"C0051"}, // Valve Power Feed
+    {0x2E,0x23,"C0060"}, // Pump Motor Circuit
+    {0x2E,0x24,"C0070"}, // CAB Internal
+    {0x2E,0x25,"C0080"}, // ABS Lamp Short
+    {0x2E,0x26,"C0081"}, // ABS Lamp Open
+    {0x2E,0x30,"C0110"}, // Brake Fluid Level
+};
+
+// ESP 0x58: PID range 2E 10 ~ 2F 3C (PCAP verified, 3-step increments)
+static const J1850DtcPidEntry kEspDtcPids[] = {
+    {0x2E,0x10,"C0031"}, {0x2E,0x13,"C0032"}, {0x2E,0x16,"C0035"},
+    {0x2E,0x19,"C0036"}, {0x2E,0x1C,"C0041"}, {0x2E,0x1F,"C0042"},
+    {0x2E,0x22,"C0045"}, {0x2E,0x25,"C0046"}, {0x2E,0x28,"C0051"},
+    {0x2E,0x2B,"C0060"}, {0x2E,0x2E,"C0070"}, {0x2E,0x37,"C0110"},
+    {0x2E,0x3A,"C0111"}, {0x2E,0x3D,"C1014"}, {0x2E,0x43,"C1015"},
+    {0x2E,0x49,"C1031"}, {0x2E,0x4C,"C1032"}, {0x2E,0x4F,"C1035"},
+    {0x2E,0x52,"C1036"}, {0x2E,0x70,"C1041"}, {0x2E,0x73,"C1042"},
+    {0x2E,0x76,"C1045"}, {0x2E,0x79,"C1046"}, {0x2E,0x7C,"C1051"},
+    {0x2E,0x7F,"C1060"}, {0x2E,0x82,"C1070"}, {0x2E,0x85,"C1071"},
+    {0x2E,0x88,"C1073"}, {0x2E,0x8B,"C1075"}, {0x2E,0x8E,"C1080"},
+    {0x2E,0x91,"C1085"}, {0x2E,0x94,"C1090"}, {0x2E,0x97,"C1095"},
+    {0x2E,0xDC,"C2100"}, {0x2E,0xDF,"C2101"}, {0x2E,0xE2,"C2102"},
+    {0x2E,0xE5,"C2103"}, {0x2E,0xFA,"C2200"}, {0x2E,0xFD,"C2201"},
+    {0x2F,0x00,"C2202"}, {0x2F,0x03,"C2203"}, {0x2F,0x06,"C2204"},
+    {0x2F,0x18,"C2300"}, {0x2F,0x1B,"C2301"}, {0x2F,0x1E,"C2302"},
+    {0x2F,0x21,"C2303"}, {0x2F,0x24,"C2304"}, {0x2F,0x27,"C2305"},
+    {0x2F,0x2A,"C2306"}, {0x2F,0x2D,"C2307"}, {0x2F,0x30,"C2308"},
+    {0x2F,0x33,"C2309"}, {0x2F,0x36,"C2310"}, {0x2F,0x39,"C2311"},
+    {0x2F,0x3C,"C2312"},
+};
+
+// Body 0x40: limited DTC PIDs (PCAP verified)
+static const J1850DtcPidEntry kBodyDtcPids[] = {
+    {0x2E,0x00,"B1A00"}, // Interior Lamp Circuit
+    {0x2E,0x01,"B1A10"}, // Door Ajar Switch
+    {0x2E,0x02,"B2100"}, // SKIM Comm Error
+    {0x2E,0x03,"B2101"}, // Bus Comm Error
+    {0x2E,0x05,"B2102"}, // Key-In Circuit
+    {0x2E,0x0D,"B2200"}, // Door Lock Circuit
+    {0x2E,0x12,"B2300"}, // Horn Relay Circuit
+};
+
+// HVAC/ATC 0x98: DTC PIDs
+static const J1850DtcPidEntry kHvacDtcPids[] = {
+    {0x2E,0x03,"B1001"}, // A/C Pressure Sensor
+    {0x2E,0x04,"B1002"}, // A/C Clutch Relay
+    {0x2E,0x05,"B1003"}, // Blend Door Actuator
+    {0x2E,0x06,"B1004"}, // Mode Door Actuator
+};
+
+// Overhead 0x68: DTC PIDs
+static const J1850DtcPidEntry kOverheadDtcPids[] = {
+    {0x2E,0x02,"B1100"}, // Compass Calibration
+    {0x2E,0x05,"B1101"}, // Temperature Sensor
+    {0x2E,0x08,"B1102"}, // Display Circuit
+};
+
+// RainSensor 0xA7
+static const J1850DtcPidEntry kRainDtcPids[] = {
+    {0x2E,0x10,"B1200"}, // Rain Sensor Circuit
+};
+
+// SKIM 0xC0
+static const J1850DtcPidEntry kSkimDtcPids[] = {
+    {0x2E,0x00,"B2500"}, // Transponder Error
+};
+
+static QList<J1850DtcPidEntry> dtcPidsForModule(WJDiagnostics::Module mod)
+{
+    QList<J1850DtcPidEntry> list;
+    const J1850DtcPidEntry *arr = nullptr;
+    int count = 0;
+
+    switch (static_cast<uint8_t>(mod)) {
+    case 0x28: arr = kAbsDtcPids;      count = sizeof(kAbsDtcPids)/sizeof(kAbsDtcPids[0]); break;
+    case 0x58: arr = kEspDtcPids;      count = sizeof(kEspDtcPids)/sizeof(kEspDtcPids[0]); break;
+    case 0x40: arr = kBodyDtcPids;     count = sizeof(kBodyDtcPids)/sizeof(kBodyDtcPids[0]); break;
+    case 0x98: arr = kHvacDtcPids;     count = sizeof(kHvacDtcPids)/sizeof(kHvacDtcPids[0]); break;
+    case 0x68: arr = kOverheadDtcPids; count = sizeof(kOverheadDtcPids)/sizeof(kOverheadDtcPids[0]); break;
+    case 0xA7: arr = kRainDtcPids;     count = sizeof(kRainDtcPids)/sizeof(kRainDtcPids[0]); break;
+    case 0xC0: arr = kSkimDtcPids;     count = sizeof(kSkimDtcPids)/sizeof(kSkimDtcPids[0]); break;
+    default: break;
+    }
+    if (arr) {
+        for (int i = 0; i < count; ++i) list.append(arr[i]);
+    }
+    return list;
+}
+
+void WJDiagnostics::readJ1850DTCsByPIDScan(Module mod, std::function<void(const QList<DTCEntry>&)> cb)
+{
+    auto pids = dtcPidsForModule(mod);
+    if (pids.isEmpty()) {
+        emit logMessage(QString("%1: no DTC PID table defined").arg(moduleInfo(mod).shortName));
+        QList<DTCEntry> empty;
+        emit dtcListReady(mod, empty);
+        if (cb) cb(empty);
+        return;
+    }
+
+    emit logMessage(QString("%1: DTC PID scan (%2 PIDs)...")
+        .arg(moduleInfo(mod).shortName).arg(pids.size()));
+
+    // Shared state for async PID scan chain
+    auto results = std::make_shared<QList<DTCEntry>>();
+    auto pidList = std::make_shared<QList<J1850DtcPidEntry>>(pids);
+    auto idx = std::make_shared<int>(0);
+
+    // Recursive lambda: scan one PID at a time
+    std::function<void()> scanNext;
+    scanNext = [this, mod, results, pidList, idx, cb, scanNext]() {
+        if (*idx >= pidList->size()) {
+            // All PIDs scanned - report results
+            emit logMessage(QString("%1: DTC scan complete - %2 faults found")
+                .arg(moduleInfo(mod).shortName).arg(results->size()));
+            emit dtcListReady(mod, *results);
+            if (cb) cb(*results);
+            return;
+        }
+
+        const auto &pid = (*pidList)[*idx];
+        QString cmd = QString("%1 %2 00")
+            .arg(pid.pidHi, 2, 16, QChar('0'))
+            .arg(pid.pidLo, 2, 16, QChar('0')).toUpper();
+
+        m_elm->sendCommand(cmd, [this, mod, results, pidList, idx, cb, scanNext, pid](const QString &resp) {
+            // Parse response: "26 xx 62 D0 D1 D2 CRC" or NRC/NO DATA
+            if (!resp.contains("NO DATA") && !resp.contains("7F") && !resp.contains("ERROR")) {
+                // Extract data bytes from response
+                QString clean = resp;
+                clean.remove(' ').remove('\r').remove('\n');
+                // Find "62" positive response marker
+                int pos62 = clean.indexOf("62");
+                if (pos62 >= 0 && pos62 + 8 <= clean.size()) {
+                    bool ok1, ok2, ok3;
+                    uint8_t d0 = clean.mid(pos62 + 2, 2).toUInt(&ok1, 16);
+                    uint8_t d1 = clean.mid(pos62 + 4, 2).toUInt(&ok2, 16);
+                    uint8_t d2 = clean.mid(pos62 + 6, 2).toUInt(&ok3, 16);
+
+                    if (ok1 && ok2 && ok3) {
+                        uint16_t dtcRaw = (d0 << 8) | d1;
+                        // Non-zero and not 0xFFFF = active DTC
+                        if (dtcRaw != 0x0000 && dtcRaw != 0xFFFF) {
+                            DTCEntry e;
+                            e.code = QString(pid.dtcCode);
+                            e.description = dtcDescription(e.code, mod);
+                            e.status = d2;
+                            e.isActive = true;
+                            e.occurrences = (d2 > 0) ? d2 : 1;
+                            e.source = mod;
+                            results->append(e);
+                            emit logMessage(QString("  DTC found: %1 [%2 %3] occ=%4")
+                                .arg(e.code)
+                                .arg(d0, 2, 16, QChar('0'))
+                                .arg(d1, 2, 16, QChar('0'))
+                                .arg(e.occurrences));
+                        }
+                    }
+                }
+            }
+
+            ++(*idx);
+            scanNext();
+        });
+    };
+
+    scanNext();
 }
 
 void WJDiagnostics::clearDTCs(Module mod, std::function<void(bool)> cb)
@@ -1251,6 +1407,60 @@ QString WJDiagnostics::dtcDescription(const QString &code, Module src)
         {"B1A00","Interior Lamp Circuit"},
         {"B1A10","Door Ajar Switch Circuit"},
         {"B2100","SKIM Communication Error"},
+        {"B2101","Bus Communication Error"},
+        {"B2102","Key-In Circuit"},
+        {"B2200","Door Lock Circuit"},
+        {"B2300","Horn Relay Circuit"},
+    };
+
+    // ESP DTCs
+    static const QMap<QString, QString> espDtcs = {
+        {"C1031","LF Inlet Valve"}, {"C1032","LF Outlet Valve"},
+        {"C1035","RF Inlet Valve"}, {"C1036","RF Outlet Valve"},
+        {"C1041","LR Inlet Valve"}, {"C1042","LR Outlet Valve"},
+        {"C1045","RR Inlet Valve"}, {"C1046","RR Outlet Valve"},
+        {"C1051","ESP Pump Motor"}, {"C1060","ESP Pressure Sensor"},
+        {"C1070","ESP Steering Angle Sensor"}, {"C1071","Steering Angle Sensor Internal"},
+        {"C1073","Yaw Rate Sensor"}, {"C1075","Lateral Acceleration Sensor"},
+        {"C1080","ESP Valve Relay"}, {"C1085","ESP Lamp Circuit"},
+        {"C1090","ESP Switch Circuit"}, {"C1095","Brake Lamp Switch"},
+        {"C2100","ABS/ESP CAN Communication"}, {"C2101","PCM CAN Timeout"},
+        {"C2102","BCM CAN Timeout"}, {"C2103","TCM CAN Timeout"},
+        {"C2200","ESP Sensor Cluster"}, {"C2201","ESP Sensor Calibration"},
+        {"C2202","ESP Sensor Supply"}, {"C2203","ESP Sensor Range"},
+        {"C2204","ESP Sensor Plausibility"},
+        {"C2300","Wheel Speed Comparison"}, {"C2301","LF-RF Speed Diff"},
+        {"C2302","LR-RR Speed Diff"}, {"C2303","Front-Rear Speed Diff"},
+        {"C2304","Speed Signal Missing LF"}, {"C2305","Speed Signal Missing RF"},
+        {"C2306","Speed Signal Missing LR"}, {"C2307","Speed Signal Missing RR"},
+        {"C2308","ABS Activation Too Long"}, {"C2309","EBD Activation Too Long"},
+        {"C2310","ESP Activation Too Long"}, {"C2311","TCS Activation Too Long"},
+        {"C2312","ESP System Voltage"},
+    };
+
+    // HVAC DTCs
+    static const QMap<QString, QString> hvacDtcs = {
+        {"B1001","A/C Pressure Sensor Circuit"},
+        {"B1002","A/C Clutch Relay Circuit"},
+        {"B1003","Blend Door Actuator Circuit"},
+        {"B1004","Mode Door Actuator Circuit"},
+    };
+
+    // Overhead DTCs
+    static const QMap<QString, QString> overheadDtcs = {
+        {"B1100","Compass Calibration Error"},
+        {"B1101","Temperature Sensor Circuit"},
+        {"B1102","Display Circuit Error"},
+    };
+
+    // Rain Sensor DTCs
+    static const QMap<QString, QString> rainDtcs = {
+        {"B1200","Rain Sensor Circuit"},
+    };
+
+    // SKIM DTCs
+    static const QMap<QString, QString> skimDtcs = {
+        {"B2500","Transponder Communication Error"},
     };
 
     // Lookup by source module first, then generic
@@ -1258,10 +1468,11 @@ QString WJDiagnostics::dtcDescription(const QString &code, Module src)
         if (ecuDtcs.contains(code)) return ecuDtcs[code];
     }
     if (src == Module::ABS) {
+        if (absDtcs.contains(code)) return absDtcs[code];
         if (tcmDtcs.contains(code)) return tcmDtcs[code];
     }
-    if (src == Module::ABS) {
-        if (absDtcs.contains(code)) return absDtcs[code];
+    if (src == Module::ESP_Module) {
+        if (espDtcs.contains(code)) return espDtcs[code];
     }
     if (src == Module::Airbag) {
         if (airbagDtcs.contains(code)) return airbagDtcs[code];
@@ -1269,13 +1480,30 @@ QString WJDiagnostics::dtcDescription(const QString &code, Module src)
     if (src == Module::BodyComputer) {
         if (bcmDtcs.contains(code)) return bcmDtcs[code];
     }
+    if (src == Module::ATC) {
+        if (hvacDtcs.contains(code)) return hvacDtcs[code];
+    }
+    if (src == Module::Overhead) {
+        if (overheadDtcs.contains(code)) return overheadDtcs[code];
+    }
+    if (src == Module::RainSensor) {
+        if (rainDtcs.contains(code)) return rainDtcs[code];
+    }
+    if (src == Module::SKIM) {
+        if (skimDtcs.contains(code)) return skimDtcs[code];
+    }
 
     // Generic fallback - search all maps
     if (ecuDtcs.contains(code)) return ecuDtcs[code];
     if (tcmDtcs.contains(code)) return tcmDtcs[code];
     if (absDtcs.contains(code)) return absDtcs[code];
+    if (espDtcs.contains(code)) return espDtcs[code];
     if (airbagDtcs.contains(code)) return airbagDtcs[code];
     if (bcmDtcs.contains(code)) return bcmDtcs[code];
+    if (hvacDtcs.contains(code)) return hvacDtcs[code];
+    if (overheadDtcs.contains(code)) return overheadDtcs[code];
+    if (rainDtcs.contains(code)) return rainDtcs[code];
+    if (skimDtcs.contains(code)) return skimDtcs[code];
     return "";
 }
 

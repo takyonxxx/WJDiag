@@ -163,14 +163,15 @@ String ELM327Emu::j1850_generic(uint8_t t, uint8_t m, uint8_t sid, const uint8_t
 String ELM327Emu::j1850_pcap_lookup(uint8_t t, uint8_t m, const String &cmdStr) {
     // Lookup exact match from real vehicle captures
     if (t == 0x28) {
-        // Mode 0x30 valve test (real vehicle)
+        // Mode 0x30 valve test (real vehicle) — echo parameters back
         if (m == 0x30) {
-            return "26 28 70 " + hex8(sid) + " " + hex8(pid) + " " + hex8(val) + " DD";
+            // cmdStr = "XX YY ZZ", echo back as positive response
+            return "26 28 70 " + cmdStr + " DD";
         }
         // Mode 0xA3 (real vehicle)
         if (m == 0xA3) return "26 28 E3 02 EE 00 0A DD";
-        // Mode 0xA0 (real vehicle)
-        if (m == 0xA0) return "26 28 E0 " + hex8(sid) + " " + hex8(pid) + " " + hex8(val) + " DD";
+        // Mode 0xA0 (real vehicle) — echo parameters back
+        if (m == 0xA0) return "26 28 E0 " + cmdStr + " DD";
         if (m == 0x22) {
             if (cmdStr == "20 00 00") return "26 28 62 56 04 00 48";  // real vehicle
             if (cmdStr == "20 01 00") return "26 28 62 18 21 00 35";
@@ -204,10 +205,10 @@ String ELM327Emu::j1850_pcap_lookup(uint8_t t, uint8_t m, const String &cmdStr) 
         }
     }
     if (t == 0x40) {
-        // Mode 0xB4 config (real vehicle)
+        // Mode 0xB4 config (real vehicle) — echo parameters back
         if (m == 0xB4) {
             if (cmdStr == "28 3F 00") return "26 40 F4 28 3F 00 16";
-            return "26 40 F4 " + hex8(sid) + " 00 00 DD";
+            return "26 40 F4 " + cmdStr + " DD";
         }
         if (m == 0x22) {
             if (cmdStr == "20 00 00") return "26 40 62 05 08 00 E2";
@@ -317,13 +318,13 @@ String ELM327Emu::j1850_pcap_lookup(uint8_t t, uint8_t m, const String &cmdStr) 
             if (cmdStr == "2E 4C 00") return "26 58 62 00 00 00 A8";
             if (cmdStr == "2E 4F 00") return "26 58 62 00 00 00 A8";
             if (cmdStr == "2E 52 00") return "26 58 62 00 00 00 A8";
-            if (cmdStr == "2E 70 00") return "26 58 62 00 00 00 A8";
+            if (cmdStr == "2E 70 00") return "26 58 62 01 41 03 A8";  // C1041 active, occ=3
             if (cmdStr == "2E 73 00") return "26 58 62 00 00 00 A8";
             if (cmdStr == "2E 76 00") return "26 58 62 00 00 00 A8";
             if (cmdStr == "2E 79 00") return "26 58 62 00 00 00 A8";
             if (cmdStr == "2E 7C 00") return "26 58 62 00 00 00 A8";
             if (cmdStr == "2E 7F 00") return "26 58 62 00 00 00 A8";
-            if (cmdStr == "2E 82 00") return "26 58 62 00 00 00 A8";
+            if (cmdStr == "2E 82 00") return "26 58 62 01 70 05 A8";  // C1070 active, occ=5
             if (cmdStr == "2E 85 00") return "26 58 62 00 00 00 A8";
             if (cmdStr == "2E 88 00") return "26 58 62 00 00 00 A8";
             if (cmdStr == "2E 8B 00") return "26 58 62 00 00 00 A8";
@@ -890,62 +891,75 @@ String ELM327Emu::kwpProcess(uint8_t sid, const uint8_t *data, int dlen) {
                 0x00,0x00};
             return kwpWrap(r, 18);
         }
-        // Block 0x16: Battery/alternator
+        // Block 0x16: Battery/alternator (real vehicle: 40 bytes)
         if (blk == 0x16) {
             uint16_t batV = (uint16_t)(14.2f * 100);    // Battery Voltage
             uint16_t batT = (uint16_t)(28.0f * 10);     // Battery Temp
             uint16_t batTV = (uint16_t)(2.5f * 1000);   // Battery Temp Voltage
             uint16_t altField = (uint16_t)(3.2f * 100);  // Alternator Field
             uint16_t altDuty = (uint16_t)(45.0f * 10);   // Alternator Duty Cycle
-            uint8_t r[] = {0x61,0x16,
+            uint8_t r[42] = {0x61,0x16,
                 (uint8_t)(batV>>8),(uint8_t)(batV&0xFF),
                 (uint8_t)(batT>>8),(uint8_t)(batT&0xFF),
                 (uint8_t)(batTV>>8),(uint8_t)(batTV&0xFF),
                 (uint8_t)(altField>>8),(uint8_t)(altField&0xFF),
                 (uint8_t)(altDuty>>8),(uint8_t)(altDuty&0xFF),
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
                 0x00,0x00, 0x00,0x00, 0x00,0x00};
-            return kwpWrap(r, 18);
+            return kwpWrap(r, 42);
         }
-        // Block 0x32: Vehicle speed
+        // Block 0x32: Vehicle speed (real vehicle: 34 bytes)
         if (blk == 0x32) {
             uint16_t vspd = 0;     // Vehicle Speed (stopped)
             uint16_t vspdSet = 0;  // Speed Setpoint
             uint16_t cruiseV = (uint16_t)(0.5f * 1000);
-            uint8_t r[] = {0x61,0x32,
+            uint8_t r[36] = {0x61,0x32,
                 (uint8_t)(vspd>>8),(uint8_t)(vspd&0xFF),
                 (uint8_t)(vspdSet>>8),(uint8_t)(vspdSet&0xFF),
                 (uint8_t)(cruiseV>>8),(uint8_t)(cruiseV&0xFF),
                 0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
                 0x00,0x00, 0x00,0x00};
-            return kwpWrap(r, 18);
+            return kwpWrap(r, 36);
         }
-        // Block 0x37: EGR/wastegate
+        // Block 0x37: EGR/wastegate (real vehicle: 36 bytes)
         if (blk == 0x37) {
             uint16_t mafEgr = (uint16_t)(350.0f);       // MAF for EGR Setpoint
             uint16_t wastegate = (uint16_t)(25.0f * 10); // Wastegate Solenoid %
-            uint8_t r[] = {0x61,0x37,
+            uint8_t r[38] = {0x61,0x37,
                 (uint8_t)(mafEgr>>8),(uint8_t)(mafEgr&0xFF),
                 (uint8_t)(wastegate>>8),(uint8_t)(wastegate&0xFF),
                 0x00,0x00, 0x00,0x00, 0x00,0x00,
-                0x00,0x00, 0x00,0x00, 0x00,0x00};
-            return kwpWrap(r, 18);
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00};
+            return kwpWrap(r, 38);
         }
-        // Block 0x13: AC system / oil pressure
+        // Block 0x13: AC system / oil pressure (real vehicle: 28 bytes)
         if (blk == 0x13) {
             uint16_t oilP = (uint16_t)(3.5f * 100);     // Oil Pressure Sensor bar
             uint16_t oilPV = (uint16_t)(2.1f * 1000);   // Oil Pressure Voltage mV
             uint16_t acP = (uint16_t)(12.0f * 100);      // AC System Pressure
             uint16_t acPV = (uint16_t)(1.8f * 1000);     // AC System Pressure Voltage
-            uint8_t r[] = {0x61,0x13,
+            uint8_t r[30] = {0x61,0x13,
                 (uint8_t)(oilP>>8),(uint8_t)(oilP&0xFF),
                 (uint8_t)(oilPV>>8),(uint8_t)(oilPV&0xFF),
                 (uint8_t)(acP>>8),(uint8_t)(acP&0xFF),
                 (uint8_t)(acPV>>8),(uint8_t)(acPV&0xFF),
                 0x00,0x00, 0x00,0x00,
-                0x00,0x00, 0x00,0x00, 0x00,0x00};
-            return kwpWrap(r, 18);
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00};
+            return kwpWrap(r, 30);
         }
-        // Block 0x36: Pedal position sensors
+        // Block 0x36: Pedal position sensors (real vehicle: 40 bytes)
         if (blk == 0x36) {
             tick();
             float tps = (engineRpm > 850.0f) ? (engineRpm - 850.0f) * 0.05f : 0.0f;
@@ -955,44 +969,54 @@ String ELM327Emu::kwpProcess(uint8_t sid, const uint8_t *data, int dlen) {
             uint16_t ped2V = (uint16_t)((0.4f + tps * 0.02f) * 1000);
             uint16_t fuelPed = (uint16_t)((8.0f + tps * 0.3f) * 100);
             uint16_t fuelCru = 0;
-            uint8_t r[] = {0x61,0x36,
+            uint8_t r[42] = {0x61,0x36,
                 (uint8_t)(ped1>>8),(uint8_t)(ped1&0xFF),
                 (uint8_t)(ped2>>8),(uint8_t)(ped2&0xFF),
                 (uint8_t)(ped1V>>8),(uint8_t)(ped1V&0xFF),
                 (uint8_t)(ped2V>>8),(uint8_t)(ped2V&0xFF),
                 (uint8_t)(fuelPed>>8),(uint8_t)(fuelPed&0xFF),
                 (uint8_t)(fuelCru>>8),(uint8_t)(fuelCru&0xFF),
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
                 0x00,0x00, 0x00,0x00};
-            return kwpWrap(r, 18);
+            return kwpWrap(r, 42);
         }
-        // Block 0x26: Fuel level / pressure regulator
+        // Block 0x26: Fuel level / pressure regulator (real vehicle: 32 bytes)
         if (blk == 0x26) {
             uint16_t fuelLvl = (uint16_t)(65.0f * 10);      // Fuel Level %
             uint16_t fuelLvlV = (uint16_t)(3.2f * 1000);    // Fuel Level Sensor Voltage
             uint16_t fuelRegOut = (uint16_t)(50.0f * 10);    // Fuel Pressure Regulator Output
             uint16_t fuelRailV = (uint16_t)(2.8f * 1000);    // Fuel Pressure Volts
             uint16_t fuelPSet = (uint16_t)(290.0f * 10);     // Fuel Pressure Setpoint
-            uint8_t r[] = {0x61,0x26,
+            uint8_t r[34] = {0x61,0x26,
                 (uint8_t)(fuelLvl>>8),(uint8_t)(fuelLvl&0xFF),
                 (uint8_t)(fuelLvlV>>8),(uint8_t)(fuelLvlV&0xFF),
                 (uint8_t)(fuelRegOut>>8),(uint8_t)(fuelRegOut&0xFF),
                 (uint8_t)(fuelRailV>>8),(uint8_t)(fuelRailV&0xFF),
                 (uint8_t)(fuelPSet>>8),(uint8_t)(fuelPSet&0xFF),
-                0x00,0x00, 0x00,0x00, 0x00,0x00};
-            return kwpWrap(r, 18);
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00};
+            return kwpWrap(r, 34);
         }
-        // Block 0x34: Transfer case, cam sync, injector bank
+        // Block 0x34: Transfer case, cam sync, injector bank (real vehicle: 36 bytes)
         if (blk == 0x34) {
             uint16_t tcaseV = (uint16_t)(2.5f * 1000);      // Transfer Case Position Voltage
             uint8_t camSync = 1;                              // Cam/Crank Sync (1=OK)
             uint16_t injCap = (uint16_t)(85.0f * 10);        // Injector Bank 1 Capacitor V
-            uint8_t r[] = {0x61,0x34,
+            uint8_t r[38] = {0x61,0x34,
                 (uint8_t)(tcaseV>>8),(uint8_t)(tcaseV&0xFF),
                 camSync, 0x00,
                 (uint8_t)(injCap>>8),(uint8_t)(injCap&0xFF),
                 0x00,0x00, 0x00,0x00, 0x00,0x00,
-                0x00,0x00, 0x00,0x00};
-            return kwpWrap(r, 18);
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00,
+                0x00,0x00, 0x00,0x00, 0x00,0x00};
+            return kwpWrap(r, 38);
         }
         // Generic ECU block
         uint8_t r[18] = {0x61, blk};

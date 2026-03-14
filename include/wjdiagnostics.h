@@ -265,6 +265,7 @@ private:
     void _finishLegacySession(std::function<void(bool)> cb);
     QList<DTCEntry> decodeJ1850DTCs(const QString &resp, Module src);
     QList<DTCEntry> decodeKWPDTCs(const QByteArray &data, Module src);
+    void readJ1850DTCsByPIDScan(Module mod, std::function<void(const QList<DTCEntry>&)> cb);
     QString dtcDescription(const QString &code, Module src);
 
     ELM327Connection *m_elm;
