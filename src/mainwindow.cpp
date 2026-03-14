@@ -132,32 +132,36 @@ void MainWindow::setupUI()
     m_tabs->setStyleSheet(
         "QTabWidget::pane { border: 1px solid #1a3050; border-top: none; }"
         "QTabBar::tab {"
-        "background: #0e1828; color: #6090a8; padding: 10px 14px;"
+        "background: #0e1828; color: #6090a8; padding: 8px 10px;"
+        "border: 1px solid #1a3050; border-bottom: none; border-radius: 8px 8px 0 0;"
+        "font-size: 16px; min-width: 40px; font-weight: 500;"
+        "}"
+        "QTabBar::tab:selected {"
+        "background: #122840; color: #00d4b4; font-weight: bold; border-bottom: 4px solid #00d4b4;"
+        "}"
+    );
+    m_tabs->tabBar()->setExpanding(false);
+    m_tabs->tabBar()->setUsesScrollButtons(true);
+#else
+    m_tabs->setStyleSheet(
+        "QTabWidget::pane { border: 1px solid #1a3050; border-top: none; }"
+        "QTabBar::tab {"
+        "background: #0e1828; color: #6090a8; padding: 8px 12px;"
         "border: 1px solid #1a3050; border-bottom: none; border-radius: 4px 4px 0 0;"
-        "font-size: 14px; min-width: 40px; font-weight: 500;"
+        "font-size: 16px; font-weight: 500;"
         "}"
         "QTabBar::tab:selected {"
         "background: #122840; color: #00d4b4; font-weight: bold; border-bottom: 2px solid #00d4b4;"
         "}"
-        "QScrollBar:vertical { width: 0px; background: transparent; }"
-        "QScrollBar:horizontal { height: 0px; background: transparent; }"
-        "QTabBar::scroller { width: 0px; }"
-        "QTabBar QToolButton { width: 0px; height: 0px; }"
     );
     m_tabs->tabBar()->setExpanding(true);
     m_tabs->tabBar()->setUsesScrollButtons(false);
-    // Disable scroll policies on existing tab pages
-    for (int i = 0; i < m_tabs->count(); ++i) {
-        if (auto *scrollArea = qobject_cast<QAbstractScrollArea*>(m_tabs->widget(i))) {
-            scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-            scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        }
-    }
 #endif
-    m_tabs->addTab(createConnectionTab(), "Connect");
-    m_tabs->addTab(createDTCTab(),        "Faults");
-    m_tabs->addTab(createLiveDataTab(),   "Live Data");
-    m_tabs->addTab(createControlsTab(),   "Controls");
+    m_tabs->addTab(createConnectionTab(), "Conn");
+    m_tabs->addTab(createDTCTab(),        "DTC");
+    m_tabs->addTab(createLiveDataTab(),   "Live");
+    m_tabs->addTab(createControlsTab(),   "Ctrl");
+    m_tabs->addTab(createActuatorTab(),   "Acts");
     m_tabs->addTab(createLogTab(),        "Log");
 
     m_tabs->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
@@ -165,8 +169,8 @@ void MainWindow::setupUI()
 
     // Hide dashboard when Controls tab is active (index 3)
     connect(m_tabs, &QTabWidget::currentChanged, this, [this](int index) {
-        bool isControls = (index == 3); // Controls tab
-        m_dashPanel->setVisible(!isControls);
+        bool hideDash = (index == 3 || index == 4); // Controls or Actuators tab
+        m_dashPanel->setVisible(!hideDash);
         m_throttleBar->setVisible(false);
     });
 
@@ -588,6 +592,7 @@ QWidget* MainWindow::createConnectionTab()
                 if (m_liveData->isPolling()) onStopLiveData();
                 updateActiveHeaderLabel();
                 rebuildDashboard();
+                rebuildActuatorPanel();
                 statusBar()->showMessage("Module deactivated");
                 return;
             }
@@ -649,6 +654,7 @@ QWidget* MainWindow::createConnectionTab()
                     // Update live data table selections for this module
                     updateLiveTableForModule();
                     rebuildDashboard();
+                    rebuildActuatorPanel();
 
                     statusBar()->showMessage(me.label + " active");
                 } else {
@@ -968,6 +974,12 @@ void MainWindow::sendWindowCmd(const QString &label, const QString &relayCmd, bo
     QString targetHex = hdr.mid(6, 2);
     QString modeHex = hdr.mid(8, 2);
 
+    // K-Line actuators: header is empty, module already initialized via switchToModule
+    if (hdr.isEmpty()) {
+        sendRelay();
+        return;
+    }
+
     // BCM mode 0xB4: special pre-activation
     if (targetHex == "80" && modeHex.compare("B4", Qt::CaseInsensitive) == 0) {
         if (m_ctrlActiveHdr == hdr) {
@@ -1013,6 +1025,49 @@ void MainWindow::sendWindowCmd(const QString &label, const QString &relayCmd, bo
         m_ctrlInitBusy = false;
         sendRelay();
     });});});});});});
+}
+
+QWidget* MainWindow::createActuatorTab()
+{
+    QWidget *w = new QWidget();
+    QVBoxLayout *lay = new QVBoxLayout(w);
+    lay->setContentsMargins(4,4,4,4);
+    lay->setSpacing(4);
+
+    // Title
+    m_actuatorTitleLabel = new QLabel("Actuator Tests");
+    m_actuatorTitleLabel->setStyleSheet(
+        "color:#00d4b4;font-size:16px;font-weight:bold;padding:6px;");
+    m_actuatorTitleLabel->setAlignment(Qt::AlignCenter);
+    lay->addWidget(m_actuatorTitleLabel);
+
+    // Scroll area takes all remaining space
+    QScrollArea *scroll = new QScrollArea();
+    scroll->setWidgetResizable(true);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setStyleSheet(
+        "QScrollArea{border:none;background:transparent;}"
+        "QScrollBar:vertical{background:#0a1520;width:10px;border-radius:5px;}"
+        "QScrollBar::handle:vertical{background:#2a5070;border-radius:5px;min-height:30px;}"
+        "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}");
+    QScroller::grabGesture(scroll->viewport(), QScroller::LeftMouseButtonGesture);
+
+    QWidget *inner = new QWidget();
+    m_actuatorLayout = new QVBoxLayout(inner);
+    m_actuatorLayout->setContentsMargins(4,4,4,4);
+    m_actuatorLayout->setSpacing(6);
+
+    QLabel *lbl = new QLabel("Select a module from the list\nto see actuator tests");
+    lbl->setStyleSheet("color:#5888a8;font-size:15px;");
+    lbl->setAlignment(Qt::AlignCenter);
+    m_actuatorLayout->addWidget(lbl);
+    m_actuatorLayout->addStretch();
+
+    scroll->setWidget(inner);
+    lay->addWidget(scroll, 1); // stretch factor 1 = fill space
+
+    return w;
 }
 
 QWidget* MainWindow::createControlsTab()
@@ -1597,6 +1652,190 @@ void MainWindow::updateActiveHeaderLabel()
     m_activeHeaderLabel->setStyleSheet(
         "background:#0a3830;padding:4px;border-radius:4px;"
         "color:#00d4b4;font-family:monospace;font-weight:bold;font-size:10px;");
+}
+
+void MainWindow::rebuildActuatorPanel()
+{
+    if (!m_actuatorLayout) return;
+    // Clear old widgets
+    QLayoutItem *item;
+    while ((item = m_actuatorLayout->takeAt(0))) {
+        if (item->widget()) item->widget()->deleteLater();
+        if (item->layout()) {
+            QLayoutItem *sub;
+            while ((sub = item->layout()->takeAt(0))) {
+                if (sub->widget()) sub->widget()->deleteLater();
+                delete sub;
+            }
+            delete item->layout();
+        }
+        delete item;
+    }
+
+    if (!m_moduleSessionActive) {
+        m_actuatorTitleLabel->setText("Actuator Tests");
+        QLabel *lbl = new QLabel("Select a module from the list to see actuator tests");
+        lbl->setStyleSheet("color:#5888a8;font-size:15px;");
+        lbl->setAlignment(Qt::AlignCenter);
+        lbl->setWordWrap(true);
+        m_actuatorLayout->addWidget(lbl);
+        return;
+    }
+
+    uint8_t addr = static_cast<uint8_t>(m_activeModId);
+    auto info = WJDiagnostics::moduleInfo(m_activeModId);
+    m_actuatorTitleLabel->setText(QString("Actuators: %1 (0x%2)")
+        .arg(info.shortName).arg(addr, 2, 16, QChar('0')).toUpper());
+
+    struct ActEntry {
+        QString name;
+        QString onCmd;
+        QString offCmd; // empty = pulse only
+        QString hdr;    // empty = K-Line (use current bus)
+    };
+    QList<ActEntry> acts;
+
+    if (addr == 0xA0 || addr == 0xA1) {
+        QString hdr = (addr == 0xA0) ? "ATSH24A02F" : "ATSH24A12F";
+        acts = {
+            {"Courtesy Lamp",     "38 00 12","38 00 00", hdr},
+            {"Front Window UP",   "38 01 12","38 01 00", hdr},
+            {"Front Window DOWN", "38 02 12","38 02 00", hdr},
+            {"Rear Window UP",    "38 03 12","38 03 00", hdr},
+            {"Rear Window DOWN",  "38 04 12","38 04 00", hdr},
+            {"Lock",              "38 05 12","38 05 00", hdr},
+            {"Unlock",            "38 06 12","38 06 00", hdr},
+            {"Mirror UP",         "38 07 12","38 07 00", hdr},
+            {"Mirror DOWN",       "38 08 12","38 08 00", hdr},
+            {"Mirror LEFT",       "38 09 12","38 09 00", hdr},
+            {"Mirror RIGHT",      "38 0A 12","38 0A 00", hdr},
+            {"Foldaway IN",       "38 0B 12","38 0B 00", hdr},
+            {"Foldaway OUT",      "38 0C 12","38 0C 00", hdr},
+            {"Mirror Heater",     "38 0D 12","38 0D 00", hdr},
+            {"Switch Illumination","38 0E 12","38 0E 00", hdr},
+            {"Set Memory LED",    "38 0F 12","38 0F 00", hdr},
+        };
+    }
+    else if (addr == 0x40) {
+        QString hdr = "ATSH24402F";
+        acts = {
+            {"Viper Relay",    "38 08 01","38 08 00", hdr},
+            {"VTSS Lamp",      "38 07 01","38 07 00", hdr},
+            {"Front Fog Lamps","38 06 02","38 06 00", hdr},
+            {"Chime",          "38 02 01","38 02 00", hdr},
+            {"Hi Beam Relay",  "38 06 08","38 06 00", hdr},
+            {"Rear Fog Lamp",  "38 06 10","38 06 00", hdr},
+            {"Hazard Flashers","38 06 20","38 06 00", hdr},
+            {"R Defog Relay",  "38 06 10","38 06 00", hdr},
+            {"HI LOW Wiper",   "38 08 02","38 08 00", hdr},
+            {"Park Lamp Relay","38 06 04","38 06 00", hdr},
+            {"Horn Relay",     "38 0D 01","38 0D 00", hdr},
+            {"Low Beam",       "3A 02 FF","",         hdr},
+        };
+    }
+    else if (addr == 0x61) {
+        QString hdr = "ATSH246122";
+        acts = {
+            {"Speedo",            "3A 00 80","3A 00 00", hdr},
+            {"Tacho",             "3A 00 40","3A 00 00", hdr},
+            {"3 Led",             "3A 00 20","3A 00 00", hdr},
+            {"4 Led",             "3A 00 10","3A 00 00", hdr},
+            {"Fuel / Drive Led",  "3A 00 08","3A 00 00", hdr},
+            {"Temp / Neutral Led","3A 00 04","3A 00 00", hdr},
+            {"Reverse Led",       "3A 00 02","3A 00 00", hdr},
+            {"Park Led",          "3A 00 01","3A 00 00", hdr},
+            {"Oil Lamp / 4Hi Led","3A 01 01","3A 01 00", hdr},
+            {"T-Case Neutral Led","3A 01 02","3A 01 00", hdr},
+            {"CE Lamp / 4Low Led","3A 01 04","3A 01 00", hdr},
+        };
+    }
+    else if (addr == 0x98) {
+        acts = {
+            {"Reset Module",       "01 01 00","", "ATSH249811"},
+            {"Self Test",          "01 FF FF","", "ATSH249830"},
+            {"Mode MTR Full Def",  "02 FF FF","", "ATSH249830"},
+            {"Mode MTR Full Panel","03 FF FF","", "ATSH249830"},
+            {"Driver Blend Hot",   "38 03 00","38 03 00", "ATSH24982F"},
+            {"Driver Blend Cold",  "38 04 00","38 04 00", "ATSH24982F"},
+            {"Pass Blend Hot",     "38 07 00","38 07 00", "ATSH24982F"},
+            {"Pass Blend Cold",    "38 08 00","38 08 00", "ATSH24982F"},
+            {"Recirc Fresh",       "38 0B 00","38 0B 00", "ATSH24982F"},
+            {"Recirc Recirculate", "38 0C 00","38 0C 00", "ATSH24982F"},
+        };
+    }
+    else if (addr == 0xC0) {
+        acts = {
+            {"Reset Module",       "01 01 00","", "ATSH24C011"},
+            {"Indicator Lamp",     "38 00 01","38 00 00", "ATSH24C02F"},
+            {"View SKIM VIN",      "28 10 00","", "ATSH24C022"},
+            {"Erase/Program Keys", "02 11 11","", "ATSH24C027"},
+        };
+    }
+    else if (addr == 0x68) {
+        acts = {
+            {"Self Test (0x31)",  "01 00 00","", "ATSH246831"},
+            {"Self Test (0x33)",  "01 00 00","", "ATSH246833"},
+            {"Reset Module",      "01 01 00","", "ATSH246811"},
+        };
+    }
+    else if (addr == 0x15) {
+        acts = {
+            {"EGR Solenoid",     "30 11 07 13 88","30 11 07 00 00", ""},
+            {"Cabin/Viscous Htr","30 1C 07 27 10","30 1C 07 00 00", ""},
+            {"Glow Plug Relay 1","30 16 07 27 10","30 16 07 00 00", ""},
+            {"Glow Plug Relay 2","30 17 07 27 10","30 17 07 00 00", ""},
+            {"A/C Control",      "30 14 07 27 10","30 14 07 00 00", ""},
+            {"SWIRL Solenoid",   "30 1A 07 13 88","30 1A 07 00 00", ""},
+            {"Boost Pressure",   "30 12 07 00 10","30 12 07 00 00", ""},
+            {"Fan Low Speed",    "30 18 07 08 34","30 18 07 00 00", ""},
+            {"Fan Full Speed",   "30 18 07 21 34","30 18 07 00 00", ""},
+        };
+    }
+    else if (addr == 0x20) {
+        acts = {
+            {"Reset Adaptives",     "31 31","", ""},
+            {"Store Adaptives",     "31 32","", ""},
+            {"Solenoid Test ON",    "30 10 07 00 02","30 10 07 00 00", ""},
+            {"Park Lockout Solenoid","30 10 07 04 00","", ""},
+        };
+    }
+
+    if (acts.isEmpty()) {
+        QLabel *lbl = new QLabel("No actuator tests for this module");
+        lbl->setStyleSheet("color:#5888a8;font-size:15px;");
+        lbl->setAlignment(Qt::AlignCenter);
+        m_actuatorLayout->addWidget(lbl);
+        return;
+    }
+
+    // Build list-style buttons
+    for (const auto &a : acts) {
+        QPushButton *btn = new QPushButton(a.name);
+        btn->setMinimumHeight(56);
+        btn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        btn->setStyleSheet(
+            "QPushButton{background:#1a3050;color:#e0e0e0;border:1px solid #2a5070;"
+            "border-radius:10px;font-size:16px;font-weight:bold;padding:12px 20px;"
+            "text-align:left;}"
+            "QPushButton:pressed{background:#00806a;border-color:#00d4b4;color:white;}");
+
+        if (a.offCmd.isEmpty()) {
+            // Pulse: click = send ON only
+            connect(btn, &QPushButton::clicked, this, [this, a]() {
+                sendWindowCmd(a.name, a.onCmd, true, a.hdr);
+            });
+        } else {
+            // Hold: press = ON, release = OFF
+            connect(btn, &QPushButton::pressed, this, [this, a]() {
+                sendWindowCmd(a.name, a.onCmd, true, a.hdr);
+            });
+            connect(btn, &QPushButton::released, this, [this, a]() {
+                sendWindowCmd(a.name, a.offCmd, false, a.hdr);
+            });
+        }
+        m_actuatorLayout->addWidget(btn);
+    }
+    m_actuatorLayout->addStretch();
 }
 
 void MainWindow::updateLiveTableForModule()

@@ -86,6 +86,11 @@ private:
     QTableWidget *m_dtcTable; QPushButton *m_readDtcBtn,*m_clearDtcBtn; QLabel *m_dtcCountLabel;
     QPushButton *m_dtcTcmBtn=nullptr,*m_dtcEcuBtn=nullptr,*m_dtcAbsBtn=nullptr,*m_dtcAirbagBtn=nullptr;
     int m_dtcSourceIdx = 0; // 0=TCM, 1=ECU, 2=ABS, 3=Airbag
+    // Dynamic actuator panel
+    QLabel *m_actuatorTitleLabel = nullptr;
+    QVBoxLayout *m_actuatorLayout = nullptr;
+    void rebuildActuatorPanel();
+    QWidget* createActuatorTab();
     QTableWidget *m_liveTable; QPushButton *m_startLiveBtn,*m_stopLiveBtn,*m_logBtn;
     QLabel *m_dashGearVal,*m_dashGearUnit;
     QLabel *m_dashSpeedVal,*m_dashSpeedUnit;
