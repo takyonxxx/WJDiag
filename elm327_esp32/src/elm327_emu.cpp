@@ -331,6 +331,7 @@ String ELM327Emu::j1850_pcap_lookup(uint8_t t, uint8_t m, const String &cmdStr) 
             if (cmdStr == "3A 00 80") return "26 61 62 3A 00 80 9B";
             if (cmdStr == "3A 00 40") return "26 61 62 3A 00 40 AE";
             if (cmdStr == "3A 00 20") return "26 61 62 3A 00 20 3A";
+            if (cmdStr == "3A 00 10") return "26 61 62 3A 00 10 DD";
             if (cmdStr == "3A 00 08") return "26 61 62 3A 00 08 55";
             if (cmdStr == "3A 00 04") return "26 61 62 3A 00 04 C9";
             if (cmdStr == "3A 00 02") return "26 61 62 3A 00 02 87";
@@ -980,6 +981,24 @@ String ELM327Emu::kwpProcess(uint8_t sid, const uint8_t *data, int dlen) {
         ecuDtcCleared = true;
         uint8_t r[] = {0x54, 0x00, 0x00};
         return kwpWrap(r, 3);
+    }
+    // SID 0x30 IOControl (ECU actuators) — positive response = echo SID+PID
+    if (sid == 0x30) {
+        if (dlen >= 2) {
+            uint8_t r[] = {0x70, data[0], data[1]};
+            return kwpWrap(r, 3);
+        }
+        uint8_t r[] = {0x70, 0x00};
+        return kwpWrap(r, 2);
+    }
+    // SID 0x31 RoutineControl (TCM reset/store adaptives)
+    if (sid == 0x31) {
+        if (dlen >= 1) {
+            uint8_t r[] = {0x71, data[0]};
+            return kwpWrap(r, 2);
+        }
+        uint8_t r[] = {0x71, 0x00};
+        return kwpWrap(r, 2);
     }
     // NRC
     uint8_t r[] = {0x7F, sid, 0x11};
