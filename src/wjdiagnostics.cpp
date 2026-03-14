@@ -490,31 +490,32 @@ void WJDiagnostics::readDTCs(Module mod, std::function<void(const QList<DTCEntry
                 if (cb) cb(r);
             });
         } else {
-            // J1850 DTC read (verified):
-            // ABS: ATSH244022 → "24 00 00" (DTC as special PID via ReadDataByID)
-            // Airbag: ATSH246022 → "28 37 00" (DTC PID 0x37)
+            // J1850 DTC read: mode 0x18
+            // Header: ATSH24xx18, Filter: ATRAxx, Command: FF 00 00
             uint8_t modAddr = static_cast<uint8_t>(mod);
-            QString dtcCmd;
-            if (modAddr == 0x40) {
-                dtcCmd = "24 00 00";   // ABS DTC read
-            } else if (modAddr == 0x60) {
-                dtcCmd = "28 37 00";   // Airbag DTC read
-            } else {
-                emit logMessage(QString("%1: J1850 DTC read not supported")
-                    .arg(moduleInfo(mod).shortName));
-                if (cb) cb({});
-                return;
-            }
+            QString readHdr = QString("ATSH24%1%2")
+                .arg(modAddr, 2, 16, QChar('0')).arg("18").toUpper();
+            QString atraCmd = QString("ATRA%1")
+                .arg(modAddr, 2, 16, QChar('0')).toUpper();
 
-            m_elm->sendCommand(dtcCmd, [this, mod, modAddr, cb](const QString &resp) {
-                QList<DTCEntry> dtcs;
-                if (!resp.contains("NO DATA") && !resp.contains("ERROR") && !resp.contains("7F")) {
-                    dtcs = decodeJ1850DTCs(resp, mod);
-                    emit logMessage(QString("%1 DTC: %2 codes found")
-                        .arg(moduleInfo(mod).shortName).arg(dtcs.size()));
-                }
-                emit dtcListReady(mod, dtcs);
-                if (cb) cb(dtcs);
+            m_elm->sendCommand(readHdr, [this, mod, modAddr, atraCmd, cb](const QString&) {
+                m_elm->sendCommand(atraCmd, [this, mod, modAddr, cb](const QString&) {
+                    m_elm->sendCommand("FF 00 00", [this, mod, modAddr, cb](const QString &resp) {
+                        QList<DTCEntry> dtcs;
+                        if (!resp.contains("NO DATA") && !resp.contains("ERROR") && !resp.contains("7F")) {
+                            dtcs = decodeJ1850DTCs(resp, mod);
+                        }
+                        emit logMessage(QString("%1 DTC read (mode 0x18): %2 codes")
+                            .arg(moduleInfo(mod).shortName).arg(dtcs.size()));
+                        // Restore read header
+                        QString restoreHdr = QString("ATSH24%1%2")
+                            .arg(modAddr, 2, 16, QChar('0')).arg("22").toUpper();
+                        m_elm->sendCommand(restoreHdr, [this, mod, dtcs, cb](const QString&) {
+                            emit dtcListReady(mod, dtcs);
+                            if (cb) cb(dtcs);
+                        });
+                    });
+                });
             });
         }
     });
@@ -533,32 +534,27 @@ void WJDiagnostics::clearDTCs(Module mod, std::function<void(bool)> cb)
         if (moduleInfo(mod).bus == BusType::KLine) {
             m_kwp->clearAllDTCs(cb);
         } else {
-            // J1850 DTC clear (verified):
-            // ABS: ATSH244011 → "01 01 00" (ECUReset = clears DTCs)
-            // Airbag: ATSH246011 → "0D" (ECUReset with param)
+            // J1850 DTC clear: mode 0x14
+            // Header: ATSH24xx14, Filter: ATRAxx, Command: FF 00 00
             uint8_t modAddr = static_cast<uint8_t>(mod);
-            QString resetHeader = QString("ATSH24%1%2")
-                .arg(modAddr, 2, 16, QChar('0'))
-                .arg("11").toUpper();
-            QString resetCmd;
-            if (modAddr == 0x40) {
-                resetCmd = "01 01 00";  // ABS: hardReset
-            } else if (modAddr == 0x60) {
-                resetCmd = "0D";        // Airbag: reset param 0x0D
-            } else {
-                emit logMessage(QString("%1: J1850 DTC clear not supported")
-                    .arg(moduleInfo(mod).shortName));
-                if (cb) cb(false);
-                return;
-            }
+            QString clearHdr = QString("ATSH24%1%2")
+                .arg(modAddr, 2, 16, QChar('0')).arg("14").toUpper();
+            QString atraCmd = QString("ATRA%1")
+                .arg(modAddr, 2, 16, QChar('0')).toUpper();
 
-            m_elm->sendCommand(resetHeader, [this, mod, resetCmd, cb](const QString&) {
-                m_elm->sendCommand(resetCmd, [this, mod, cb](const QString &resp) {
-                    // ECUReset positive response: 0x51
-                    bool ok = resp.contains("51") && !resp.contains("7F");
-                    emit logMessage(QString("%1 DTC clear (ECUReset): %2")
-                        .arg(moduleInfo(mod).shortName, ok ? "OK" : resp.trimmed()));
-                    if (cb) cb(ok);
+            m_elm->sendCommand(clearHdr, [this, mod, modAddr, atraCmd, cb](const QString&) {
+                m_elm->sendCommand(atraCmd, [this, mod, modAddr, cb](const QString&) {
+                    m_elm->sendCommand("FF 00 00", [this, mod, modAddr, cb](const QString &resp) {
+                        bool ok = resp.contains("54") && !resp.contains("7F");
+                        emit logMessage(QString("%1 DTC clear (mode 0x14): %2")
+                            .arg(moduleInfo(mod).shortName, ok ? "OK" : resp.trimmed()));
+                        // Restore read header
+                        QString restoreHdr = QString("ATSH24%1%2")
+                            .arg(modAddr, 2, 16, QChar('0')).arg("22").toUpper();
+                        m_elm->sendCommand(restoreHdr, [this, ok, cb](const QString&) {
+                            if (cb) cb(ok);
+                        });
+                    });
                 });
             });
         }
@@ -1314,38 +1310,46 @@ void WJDiagnostics::clearDTCs(std::function<void(bool)> cb)
     clearDTCs(m_activeModule, cb);
 }
 
-// readAllLiveData - K-Line TCM (0x20) Block 0x30 = transmission live data
+// readAllLiveData - K-Line TCM (0x20) All 5 blocks (PCAP-verified order)
 void WJDiagnostics::readAllLiveData(std::function<void(const TCMStatus&)> cb)
 {
     auto tcm = std::make_shared<TCMStatus>();
+    auto step = std::make_shared<int>(0);
+    auto doNext = std::make_shared<std::function<void()>>();
+    static const uint8_t tcmBlocks[] = {0x30, 0x31, 0x34, 0x33, 0x32};
 
-    // Switch to K-Line TCM
-    switchToModule(Module::KLineTCM, [this, tcm, cb](bool ok) {
-        if (!ok) { if (cb) cb(*tcm); return; }
-
-        // Read block 0x30 - contains 22 bytes of live transmission data
-        m_elm->sendCommand("21 30", [this, tcm, cb](const QString &resp) {
-            // Validate response is from TCM (0x20), not ECU (0x15)
-            // KWP response: XX F1 20 61 30 ... (source=0x20=TCM)
-            // If we see F1 15, bus is still on ECU - need reinit
+    *doNext = [this, tcm, step, doNext, cb]() {
+        if (*step >= 5) {
+            m_elm->sendCommand("ATRV", [this, tcm, cb](const QString &rv) {
+                QString v = rv.trimmed().remove('V').remove('v');
+                bool ok = false;
+                double volts = v.toDouble(&ok);
+                if (ok && volts > 0) tcm->batteryVoltage = volts;
+                m_lastTCM = *tcm;
+                emit tcmStatusUpdated(*tcm);
+                if (cb) cb(*tcm);
+            });
+            return;
+        }
+        uint8_t blk = tcmBlocks[*step];
+        QString cmd = QString("21 %1").arg(blk, 2, 16, QChar('0')).toUpper();
+        m_elm->sendCommand(cmd, [this, tcm, step, doNext, blk](const QString &resp) {
             if (resp.contains("F1 15") && !resp.contains("F1 20")) {
                 emit logMessage("WARNING: Response from ECU (0x15), not TCM (0x20) - bus mismatch!");
-                // Force reinit on next call
                 m_activeBus = BusType::None;
-                m_activeModule = Module::MotorECU; // reflect actual state
-                if (cb) cb(*tcm);
+                m_activeModule = Module::MotorECU;
+                (*step) = 5; // skip remaining
+                (*doNext)();
                 return;
             }
-            // Parse KWP response: find "61 30" positive response
             if (!resp.contains("NO DATA") && !resp.contains("7F") && !resp.contains("ERROR")) {
                 QByteArray raw;
                 QString cleaned = resp;
                 cleaned.remove(' ').remove('\r').remove('\n');
-                int pos = cleaned.indexOf("6130", 0, Qt::CaseInsensitive);
+                QString marker = QString("61%1").arg(blk, 2, 16, QChar('0'));
+                int pos = cleaned.indexOf(marker, 0, Qt::CaseInsensitive);
                 if (pos >= 0) {
-                    // Strip checksum: everything from "6130" to end minus last 2 chars (checksum byte)
                     QString dataHex = cleaned.mid(pos);
-                    // Remove last byte (checksum)
                     if (dataHex.length() > 4) dataHex.chop(2);
                     for (int i = 0; i + 1 < dataHex.length(); i += 2) {
                         bool ok2;
@@ -1353,26 +1357,18 @@ void WJDiagnostics::readAllLiveData(std::function<void(const TCMStatus&)> cb)
                         if (ok2) raw.append(static_cast<char>(b));
                     }
                 }
-                // raw[0]=0x61, raw[1]=0x30, raw[2..23]=22 bytes data
                 if (raw.size() >= 4) {
-                    parseTCMBlock30(raw, *tcm);
+                    if (blk == 0x30) parseTCMBlock30(raw, *tcm);
+                    else parseTCMBlock(blk, raw, *tcm);
                 }
             }
-
-            // Read battery voltage via ATRV (use as solenoid supply proxy)
-            m_elm->sendCommand("ATRV", [this, tcm, cb](const QString &rv) {
-                QString v = rv.trimmed().remove('V').remove('v');
-                bool ok = false;
-                double volts = v.toDouble(&ok);
-                if (ok && volts > 0) {
-                    tcm->batteryVoltage = volts;
-                    tcm.solenoidSupply = volts;  // proxy: solenoid fed from battery
-                }
-                m_lastTCM = *tcm;
-                emit tcmStatusUpdated(*tcm);
-                if (cb) cb(*tcm);
-            });
+            (*step)++;
+            (*doNext)();
         });
+    };
+
+    switchToModule(Module::KLineTCM, [doNext](bool ok) {
+        if (ok) (*doNext)();
     });
 }
 

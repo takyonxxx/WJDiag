@@ -34,10 +34,10 @@ public:
         EVIC         = 0x2A,   // Overhead Console / EVIC
         BodyComputer = 0x40,   // Body Computer (hazard/horn/mirrors)
         Airbag       = 0x60,   // Airbag (ORC/AOSIM)
-        SKIM         = 0xC0,   // SKIM/Immobilizer (APK verified)
+        SKIM         = 0xC0,   // SKIM/Immobilizer 
         ATC          = 0x98,   // HVAC/ATC (APK verified, same as MemSeat)
-        // 0x80 = DEAD on EU vehicle (NO DATA)
-        Radio        = 0x81,   // CD Changer/Radio (APK verified)
+        Radio80      = 0x80,   // Radio (NO DATA on EU)
+        Radio        = 0x81,   // CD Changer
         // MemSeat uses same address as ATC (0x98)
         DriverDoor   = 0xA0,   // Driver Door (left windows)
         PassengerDoor= 0xA1,   // Passenger Door (right windows)
@@ -48,7 +48,7 @@ public:
         SatAudio     = 0x87,   // Satellite Audio
         HandsFree    = 0x90,   // Hands Free / Uconnect
         RainSensor   = 0xA7,   // Rain Sensor
-        ParkAssist   = 0x62,   // Park Assist (APK verified)
+        ParkAssist   = 0x62,   // Park Assist 
     };
     Q_ENUM(Module)
 

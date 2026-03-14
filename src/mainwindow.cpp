@@ -514,34 +514,49 @@ QWidget* MainWindow::createConnectionTab()
         bool verified;
     };
     QList<ModEntry> modEntries = {
-        // K-Line modules
-        {WJDiagnostics::Module::MotorECU, "Engine ECU",
-         "K-Line 0x15 | EDC15C2 OM612 | Security: ArvutaKoodi", true},
-        {WJDiagnostics::Module::KLineTCM, "TCM (K-Line)",
-         "K-Line 0x20 | NAG1 722.6 EGS52 | Security: swap+XOR", true},
-        // J1850 VPW modules
-        {WJDiagnostics::Module::BodyComputer, "Body Computer",
-         "J1850 0x40 | ATRA40 | relay: hazard/horn/windows/mirrors", true},
-        {WJDiagnostics::Module::Airbag, "Airbag (ORC)",
-         "J1850 0x60 | ATRA60 | NRC 0x22 (needs special conditions)", true},
-        {WJDiagnostics::Module::ATC, "Climate (HVAC)",
-         "J1850 0x68 | ATRA68 | mode 0x22/0x31/0x33", true},
-        {WJDiagnostics::Module::ATC, "Memory Seat / Mirror",
-         "J1850 0x98 | ATRA98 | DTC read verified", true},
-        {WJDiagnostics::Module::DriverDoor, "Driver Door",
-         "J1850 0xA0 | ATRAA0 | mode 0x2F (windows/locks/mirrors)", true},
-        {WJDiagnostics::Module::PassengerDoor, "Passenger Door",
-         "J1850 0xA1 | ATRAA1 | mode 0x2F (windows/locks/mirrors)", true},
-        {WJDiagnostics::Module::ABS, "ABS / TCM (J1850)",
-         "J1850 0x28 | ATRA28 | read + DTC clear", true},
-        {WJDiagnostics::Module::ParkAssist, "VTSS / Park Assist",
-         "J1850 0xC0 | ATRAC0 | mode 0x22/0x27/0x2F/0xB4", true},
-        {WJDiagnostics::Module::ESP_Module, "ESP / Traction Control",
-         "J1850 0x58 | ATRA58 | read only", true},
-        {WJDiagnostics::Module::Cluster, "Instrument Cluster",
-         "J1850 0x61 | ATRA61 | gauge test via SID 0x3A", true},
-        {WJDiagnostics::Module::RainSensor, "Rain Sensor",
-         "J1850 0xA7 | ATRAA7 | read + DTC clear", true},
+        // Exact order from real vehicle full module scan (PCAP verified)
+        // 1-2: K-Line
+        {WJDiagnostics::Module::MotorECU, "1. Engine ECU",
+         "K-Line 0x15 | EDC15C2 OM612 | 9 actuators + 14-block live data", true},
+        {WJDiagnostics::Module::KLineTCM, "2. Transmission (TCM)",
+         "K-Line 0x20 | NAG1 722.6 | 4 tests + 5-block live data", true},
+        // 3-20: J1850 VPW (scan order)
+        {WJDiagnostics::Module::ABS, "3. ABS",
+         "J1850 0x28 | 12 valve tests + DTC", true},
+        {WJDiagnostics::Module::ESP_Module, "4. Airbag / ESP",
+         "J1850 0x58 | read + 50 live PIDs", true},
+        {WJDiagnostics::Module::Cluster, "5. Instrument Cluster",
+         "J1850 0x61 | 11 LED + 6 gauge tests (SID 0x3A)", true},
+        {WJDiagnostics::Module::SKIM, "6. SKIM / Immobilizer",
+         "J1850 0xC0 | reset + VIN + key program", true},
+        {WJDiagnostics::Module::BodyComputer, "7. Body Computer",
+         "J1850 0x40 | 14 relays + mode 0xB4 config", true},
+        {WJDiagnostics::Module::ATC, "8. HVAC / ATC / Memory Seat",
+         "J1850 0x98 | 10 motor tests + cross-read 0x40", true},
+        {WJDiagnostics::Module::DriverDoor, "9. Driver Door",
+         "J1850 0xA0 | 16 actuators (windows/mirrors/locks)", true},
+        {WJDiagnostics::Module::PassengerDoor, "10. Passenger Door",
+         "J1850 0xA1 | 15 actuators + RKE program", true},
+        {WJDiagnostics::Module::Airbag, "11. Electro Mech Cluster",
+         "J1850 0x60 | NRC on EU vehicle", true},
+        {WJDiagnostics::Module::Overhead, "12. Overhead Console",
+         "J1850 0x68 | self test + reset", true},
+        {WJDiagnostics::Module::Navigation, "13. Navigation",
+         "J1850 0x6D | not present", false},
+        {WJDiagnostics::Module::Radio80, "14. Radio",
+         "J1850 0x80 | NO DATA", false},
+        {WJDiagnostics::Module::Radio, "15. CD Changer",
+         "J1850 0x81 | not present", false},
+        {WJDiagnostics::Module::ParkAssist, "16. Park Assist",
+         "J1850 0x62 | not present", false},
+        {WJDiagnostics::Module::RainSensor, "17. Rain Sensor",
+         "J1850 0xA7 | read + DTC clear", true},
+        {WJDiagnostics::Module::EVIC, "18. Adjustable Pedal",
+         "J1850 0x2A | NO DATA", false},
+        {WJDiagnostics::Module::SatAudio, "19. Satellite Audio",
+         "J1850 0x87 | not present", false},
+        {WJDiagnostics::Module::HandsFree, "20. Hands Free / Uconnect",
+         "J1850 0x90 | not present", false},
     };
 
     m_moduleButtons.clear();
@@ -1300,6 +1315,8 @@ void MainWindow::onConnectionStateChanged(ELM327Connection::ConnectionState stat
         m_btConnectBtn->setEnabled(false);
         m_disconnectBtn->setEnabled(true);
         for (auto *b : m_moduleButtons) b->setEnabled(true);
+        m_readDtcBtn->setEnabled(true);
+        m_clearDtcBtn->setEnabled(true);
         statusBar()->showMessage("Ready — Select a module");
         break;
     }
@@ -1559,7 +1576,7 @@ void MainWindow::onLogMessage(const QString &msg)
 void MainWindow::updateStatusLabels(const TCMDiagnostics::TCMStatus &st)
 {
     m_dashGearVal->setText(gearToString(st.currentGear));
-    m_dashRpmVal->setText(QString::number(st.turbineRPM,'f',0));
+    m_dashRpmVal->setText(QString::number(st.turbineRpm,'f',0));
     m_dashSpeedVal->setText(QString::number(st.vehicleSpeed,'f',0));
     m_dashSolVoltVal->setText(QString::number(st.solenoidSupply,'f',1));
     m_dashCoolantVal->setText(QString::number(st.transTemp,'f',0));      // Trans temp

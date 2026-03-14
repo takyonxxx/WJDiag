@@ -123,13 +123,13 @@ void LiveDataManager::pollTCM(std::function<void()> then)
         // Merge TCM values into map
         QMap<uint8_t, double> vals;
         vals[0x01] = status.actualGear;
-        vals[0x10] = status.turbineRPM;
+        vals[0x10] = status.turbineRpm;
         vals[0x13] = status.outputRPM;
         vals[0x14] = status.transTemp;
         vals[0x15] = status.linePressure;
         vals[0x16] = status.solenoidSupply;
-        vals[0x18] = status.actualTCCslip;
-        vals[0x19] = status.desTCCslip;
+        vals[0x18] = status.actualTccSlip;
+        vals[0x19] = status.desTccSlip;
         vals[0x20] = status.vehicleSpeed;
         for (auto it = vals.begin(); it != vals.end(); ++it)
             m_lastValues[it.key()] = it.value();
