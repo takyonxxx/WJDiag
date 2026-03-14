@@ -632,8 +632,8 @@ void WJDiagnostics::readJ1850DTCsByPIDScan(Module mod, std::function<void(const 
     auto idx = std::make_shared<int>(0);
 
     // Recursive lambda: scan one PID at a time
-    std::function<void()> scanNext;
-    scanNext = [this, mod, results, pidList, idx, cb, scanNext]() {
+    auto scanNext = std::make_shared<std::function<void()>>();
+    *scanNext = [this, mod, results, pidList, idx, cb, scanNext]() {
         if (*idx >= pidList->size()) {
             // All PIDs scanned - report results
             emit logMessage(QString("%1: DTC scan complete - %2 faults found")
@@ -685,11 +685,11 @@ void WJDiagnostics::readJ1850DTCsByPIDScan(Module mod, std::function<void(const 
             }
 
             ++(*idx);
-            scanNext();
+            (*scanNext)();
         });
     };
 
-    scanNext();
+    (*scanNext)();
 }
 
 void WJDiagnostics::clearDTCs(Module mod, std::function<void(bool)> cb)
