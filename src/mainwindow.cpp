@@ -1045,21 +1045,17 @@ void MainWindow::sendWindowCmd(const QString &label, const QString &relayCmd, bo
         return;
     }
 
-    // Different module — full J1850 init with ATRA:
-    // ATSP2 -> ATIFR0 -> ATH1 -> ATSH24xx22 -> ATRAxx -> ATSH24xx2F -> relay
+    // Different module — set ATRA + mode header, skip redundant AT init
+    // ATSP2/ATIFR0/ATH1 already set at connection time
     m_ctrlActiveHdr = hdr;
     m_ctrlInitBusy = true;
-    QString readHdr = "ATSH24" + targetHex + "22";
-    QString atra = "ATRA" + targetHex;
-    m_elm->sendCommand("ATSP2", [this, readHdr, atra, hdr, sendRelay](const QString &) {
-    m_elm->sendCommand("ATIFR0", [this, readHdr, atra, hdr, sendRelay](const QString &) {
-    m_elm->sendCommand("ATH1", [this, readHdr, atra, hdr, sendRelay](const QString &) {
-    m_elm->sendCommand(readHdr, [this, atra, hdr, sendRelay](const QString &) {
+    QString targetHex2 = hdr.mid(6, 2);
+    QString atra = "ATRA" + targetHex2;
     m_elm->sendCommand(atra, [this, hdr, sendRelay](const QString &) {
     m_elm->sendCommand(hdr, [this, sendRelay](const QString &) {
         m_ctrlInitBusy = false;
         sendRelay();
-    });});});});});});
+    });});
 }
 
 QWidget* MainWindow::createActuatorTab()
@@ -1363,6 +1359,9 @@ void MainWindow::onConnectionStateChanged(ELM327Connection::ConnectionState stat
         m_readDtcBtn->setEnabled(false);
         m_clearDtcBtn->setEnabled(false);
         m_startLiveBtn->setEnabled(false);
+        m_ctrlActiveHdr.clear();
+        m_ctrlInitBusy = false;
+        m_actHdrActive.clear();
         if (m_batteryTimer) m_batteryTimer->stop();
         updateActiveHeaderLabel();
         statusBar()->showMessage("Disconnected");
